@@ -30,7 +30,7 @@ int main()
 	else {
 		Client client;
 		cout << "Connecting to Server: " << endl;
-		while (client.connectServer(true) < 0);k
+		while (client.connectServer(true) < 0);
 	}
 
 	WSACleanup();
