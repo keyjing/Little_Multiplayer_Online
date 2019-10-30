@@ -1,9 +1,6 @@
 #include "Multicast.h"
 #include<thread>
 
-#include<iostream>
-using namespace std;
-
 using std::thread;
 
 static void send_thd(Multicast* mc, const char* msg)

@@ -28,3 +28,13 @@ long long getHashOfIP(const char* ip)
 		res = (res << 8) + sub[i];
 	return res;
 }
+
+void getLocalIP(char* ip)
+{
+	// 获取本机 IP
+	char hostname[BUFSIZE] = { 0 };
+	gethostname(hostname, sizeof(hostname));
+	//需要关闭SDL检查：Project properties -> Configuration Properties -> C/C++ -> General -> SDL checks -> No
+	hostent* host = gethostbyname(hostname);
+	charArrayCopy(ip, inet_ntoa(*(in_addr*)*host->h_addr_list), IP_LENGTH);
+}
