@@ -3,7 +3,7 @@
 
 using std::thread;
 
-static void send_thd(Multicast* mc, const char* msg)
+void Multicast::send_thd(Multicast* mc, const char* msg)
 {
 	//多播套接字
 	SOCKET sock = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0,		/* WSASocketW 中 protocal 不能设为 0 */
@@ -38,6 +38,7 @@ static void send_thd(Multicast* mc, const char* msg)
 	closesocket(sockM);
 	closesocket(sock);
 	mc->turnOff();
+	mc->thd_running = false;
 }
 
 int Multicast::sender(const char* msg)
@@ -45,7 +46,7 @@ int Multicast::sender(const char* msg)
 	if (isOn())
 		return MC_OCCUPIED;
 	turnOn();
-
+	thd_running = true;
 	//通过分离的线程发送多播
 	thread thd(send_thd, this, msg);
 	thd.detach();

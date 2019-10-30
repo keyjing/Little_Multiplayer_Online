@@ -1,15 +1,9 @@
 #include "Server.h"
 #include<iostream>
-using namespace std;
 
-Server::~Server()
-{
-	if (ctrlOpt) delete ctrlOpt;
-	for (auto elem : clientsSock)
-		if (elem != INVALID_SOCKET) closesocket(elem);
-}
+using std::cerr;
 
-int Server::waitConnect(bool showLog)
+int Server::waitConnect(bool openMulticast, bool showLog)
 {	
 	//创建套接字
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -33,7 +27,11 @@ int Server::waitConnect(bool showLog)
 	}
 	//打开多播
 	Multicast mc(SERV_MC_ADDR, SERV_MC_PORT);
-	mc.sender(name);
+	if (openMulticast && mc.sender(name) < 0) {
+		if(showLog) cerr << "OPEN MULTICAST FAILED!\n";
+		closesocket(sock);
+		return SERV_ERROR_NO_MC;
+	}
 	//开始接收连接
 	SOCKET cSock;		// 临时客户端套接字
 	sockaddr_in addr;
@@ -42,16 +40,17 @@ int Server::waitConnect(bool showLog)
 	long long clients_ip_hash[MAX_CONNECT] = { 0 };
 	char buffer[BUFSIZE] = { 0 };
 	int record = hostReserve;		// 从 hostReserve 开始，前面保留
-	while (record < clients) {
+	while (record <= clients) {
 		cSock = accept(sock, (SOCKADDR*)&addr, &addrSize);
 		// 失败，放弃
 		if (cSock == INVALID_SOCKET)
 			continue;
 		// 获取客户端 IP 地址
-		inet_ntop(AF_INET, &addr.sin_addr, buffer, IP_LENGTH);
-		if (showLog) cout << "Connect From: " << buffer << endl << "Index: " << record;
+		char client_ip[IP_LENGTH] = { 0 };
+		inet_ntop(AF_INET, &addr.sin_addr, client_ip, IP_LENGTH);
+		if (showLog) cerr << "SERVER: Connect From: " << client_ip << " Index: " << record << "\n";
 		// 转化为 hash 值
-		long long iphash = getHashOfIP(buffer);
+		long long iphash = getHashOfIP(client_ip);
 		bool found = false;
 		for (int i = 0; i < record && !found; ++i) {
 			if (clients_ip_hash[i] == iphash) found = true;
@@ -69,12 +68,12 @@ int Server::waitConnect(bool showLog)
 			continue;
 		}
 		// 进行记录
-		if (showLog) cout << " RECORD!" << endl;
+		if (showLog) cerr << "SERVER: RECORD "<< client_ip << " SUCCESS!\n";
 		clients_ip_hash[record] = iphash;
 		clientsSock[record++] = cSock;
 	}
 	//关闭多播
-	mc.turnOff();
+	if(openMulticast) mc.turnOff();
 	return 0;
 }
 

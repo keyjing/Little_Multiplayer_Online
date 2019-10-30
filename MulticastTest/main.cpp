@@ -10,18 +10,9 @@ using namespace std;
 int main()
 {
 	char ch;
-
 	cout << "Server or Client(s or c): ";
-
 	while ((ch = _getch()) != 's' && ch != 'c');
-
 	cout << endl;
-
-	WSADATA wsa;
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) < 0) {
-		cout << "CANNOT OPEN DLL" << endl;
-		return -1;
-	}
 
 	Multicast mc("233.0.0.1", 2333);
 
@@ -41,8 +32,6 @@ int main()
 			cout << buffer << endl << ip << endl;
 	}
 	cout << "Over!" << endl;
-
-	WSACleanup();
 
 	system("pause");
 

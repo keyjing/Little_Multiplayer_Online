@@ -16,10 +16,20 @@ class Client
 	SOCKET servSock = INVALID_SOCKET;
 
 public:
-	Client() { }
-	~Client() {	if (servSock != INVALID_SOCKET) closesocket(servSock);}
+	Client() { 
+		WSADATA wsa;
+		WSAStartup(MAKEWORD(2, 2), &wsa);
+	}
+	~Client() {	
+		if (servSock != INVALID_SOCKET) closesocket(servSock);
+		WSACleanup();
+	}
 
-	int connectServer(bool showLog = false);
+	/*	连接服务器
+	*	@ server_ip	: 要连接的服务器 IP， 当为 NULL 时通过多播查找局域网进行连接，否则直接连接
+	*	@ showLog	: 是否打印连接过程中的 LOG，默认不打印
+	*/
+	int connectServer(const char* server_ip, bool showLog = false);	
 
 	int getMyOption();
 	int sendMyOption();

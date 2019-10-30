@@ -32,15 +32,22 @@ class Server
 	void setName(const char* _name) { charArrayCopy(name, _name, BUFSIZE); }
 	void setClients(int _clients) {
 		clients = _clients;
-		if (clients < 1) clients = 1;
+		if (clients < 0) clients = 0;
 		else if (clients >= MAX_CONNECT) clients = MAX_CONNECT;
 	}
 
 public:
 	Server(const char* _name, int _clients) { 
 		setName(_name); setClients(_clients);
+		WSADATA wsa;
+		WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
-	~Server();
+	~Server() {
+		if (ctrlOpt) delete ctrlOpt;
+		for (auto elem : clientsSock)
+			if (elem != INVALID_SOCKET) closesocket(elem);
+		WSACleanup();
+	}
 
 	void setHostReserve(int n) {
 		hostReserve = n;
@@ -53,7 +60,7 @@ public:
 		ctrlOpt = _ctrlOpt; 
 	}
 
-	int waitConnect(bool showLog = false);
+	int waitConnect(bool openMulticast, bool showLog = false);
 
 	int recvEveryOption();
 

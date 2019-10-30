@@ -6,7 +6,7 @@
 /*******	Multicast 返回的状态	********/
 #define MC_SUCCESS		0		//成功
 #define MC_OCCUPIED		-1		//被占用
-#define MC_NO_OCCUPIED	-2		//被占用
+#define MC_NO_OCCUPIED	1		//没被占用
 #define MC_SOCK_FAILED	-3		//创建套接字失败
 #define MC_NO_RECEVICE	-4		//没有接收到多播
 
@@ -16,15 +16,25 @@ class Multicast
 	int port = 0;								// 端口 1024 ~ 65536	
 	volatile bool multi_status_on = false;		//多播状态，多线程访问需要加 volatile
 
+	volatile bool thd_running = false;
 	void turnOn() { multi_status_on = true; }
+	static void send_thd(Multicast* mc, const char* msg);
 
 public:
 
 	Multicast(const char* ip_addr,  int _port) {		//通过 多播地址 和 端口 创建多播
 		charArrayCopy(multi_ip, ip_addr, IP_LENGTH);
 		port = _port;
+		WSADATA wsa;
+		WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
-	~Multicast() {	}
+	~Multicast() { 
+		while (thd_running) {		/* 注：等待线程关闭，否则线程会出错			*/	
+			turnOff();
+			Sleep(100); 
+		}
+		WSACleanup(); 
+	}
 
 	char* getMultiIP() { return multi_ip; }
 	int getPort() { return port; }
