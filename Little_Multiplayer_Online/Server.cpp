@@ -1,6 +1,7 @@
 #include "Server.h"
 #include<iostream>
 
+using std::thread;
 using std::cerr;
 
 int Server::waitConnect(bool openMulticast, bool showLog)
@@ -85,4 +86,16 @@ int Server::recvEveryOption()
 int Server::sendEachOptionS()
 {
 	return 0;
+}
+
+void Server::working_thd(Server* sp)
+{
+	sp->is_working_thd_stop = false;		// 工作线程状态：执行
+	sp->working = true;
+	while (sp->working) {		// 直到接收 结束 信号结束
+		
+
+
+	}
+	sp->is_working_thd_stop = true;			// 工作线程状态：结束
 }

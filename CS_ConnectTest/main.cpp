@@ -15,9 +15,6 @@ using namespace std;
 
 int main()
 {
-	//WSADATA wsa;
-	//WSAStartup(MAKEWORD(2, 2), &wsa);
-
 	char ch;
 	cout << "Server or Client(s or c): ";
 	while ((ch = _getch()) != 's' && ch != 'c');

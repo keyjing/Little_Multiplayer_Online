@@ -18,11 +18,11 @@ class Client
 public:
 	Client() { 
 		WSADATA wsa;
-		WSAStartup(MAKEWORD(2, 2), &wsa);
+		::WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
 	~Client() {	
-		if (servSock != INVALID_SOCKET) closesocket(servSock);
-		WSACleanup();
+		if (servSock != INVALID_SOCKET) ::closesocket(servSock);
+		::WSACleanup();
 	}
 
 	/*	连接服务器

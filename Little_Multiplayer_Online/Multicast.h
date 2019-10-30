@@ -26,14 +26,14 @@ public:
 		charArrayCopy(multi_ip, ip_addr, IP_LENGTH);
 		port = _port;
 		WSADATA wsa;
-		WSAStartup(MAKEWORD(2, 2), &wsa);
+		::WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
 	~Multicast() { 
 		while (thd_running) {		/* 注：等待线程关闭，否则线程会出错			*/	
 			turnOff();
 			Sleep(100); 
 		}
-		WSACleanup(); 
+		::WSACleanup();
 	}
 
 	char* getMultiIP() { return multi_ip; }
