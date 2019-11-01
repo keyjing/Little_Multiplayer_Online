@@ -128,13 +128,11 @@
     <ClCompile Include="Client.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Multicast.cpp" />
-    <ClCompile Include="MyWSAInfo.cpp" />
     <ClCompile Include="Server.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Client.h" />
     <ClInclude Include="Multicast.h" />
-    <ClInclude Include="MyWSAInfo.h" />
     <ClInclude Include="Server.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

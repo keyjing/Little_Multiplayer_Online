@@ -1,7 +1,6 @@
 #include<iostream>
 #include<conio.h>
-#include "../Little_Multiplayer_Online//MyWSAInfo.h"
-#include "../Little_Multiplayer_Online//MyWSAInfo.cpp"
+
 #include "../Little_Multiplayer_Online/Multicast.h"
 #include "../Little_Multiplayer_Online/Multicast.cpp"
 

@@ -21,9 +21,6 @@
     <ClCompile Include="Multicast.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="MyWSAInfo.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="Server.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -33,9 +30,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Multicast.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="MyWSAInfo.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Server.h">

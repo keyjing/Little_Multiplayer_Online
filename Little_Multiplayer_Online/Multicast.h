@@ -1,7 +1,10 @@
 #ifndef _Multicast_h
 #define _Multicast_h
 
-#include "MyWSAInfo.h"
+#include<WinSock2.h>
+#include<WS2tcpip.h>
+#include<cstdlib>
+#pragma comment(lib, "ws2_32.lib")
 
 /*******	Multicast 返回的状态	********/
 #define MC_SUCCESS		0		//成功
@@ -9,6 +12,9 @@
 #define MC_NO_OCCUPIED	1		//没被占用
 #define MC_SOCK_FAILED	-3		//创建套接字失败
 #define MC_NO_RECEVICE	-4		//没有接收到多播
+
+#define IP_LENGTH		16
+#define BUFSIZE			1024
 
 class Multicast
 {
@@ -23,7 +29,7 @@ class Multicast
 public:
 
 	Multicast(const char* ip_addr,  int _port) {		//通过 多播地址 和 端口 创建多播
-		charArrayCopy(multi_ip, ip_addr, IP_LENGTH);
+		memcpy(&multi_ip, ip_addr, IP_LENGTH * sizeof(char));
 		port = _port;
 		WSADATA wsa;
 		::WSAStartup(MAKEWORD(2, 2), &wsa);

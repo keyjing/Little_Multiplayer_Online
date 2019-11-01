@@ -7,7 +7,7 @@ int Client::connectServer(const char* _server_ip, bool showLog)
 	char name[BUFSIZE] = { 0 };
 	char server_ip[IP_LENGTH] = { 0 };
 	if (_server_ip != NULL && _server_ip[0] != '\0')				// 有传入服务器 IP 时直接连接，否则进行局域网查找
-		::charArrayCopy(server_ip, _server_ip, IP_LENGTH);
+		memcpy(server_ip, _server_ip, IP_LENGTH);
 	else {
 		char name[BUFSIZE] = { 0 };
 		// 多播获取服务器名和 IP
