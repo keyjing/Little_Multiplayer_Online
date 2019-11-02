@@ -23,17 +23,6 @@ static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
 	return res;
 }
 
-static void getLocalIP(char* ip)					// 获取当前主机 IP
-{
-	// 获取本机 IP
-	char hostname[BUFSIZE] = { 0 };
-	::gethostname(hostname, sizeof(hostname));
-	//需要关闭SDL检查：Project properties -> Configuration Properties -> C/C++ -> General -> SDL checks -> No
-	hostent* host = ::gethostbyname(hostname);
-	memcpy(ip, inet_ntoa(*(in_addr*)*host->h_addr_list), IP_LENGTH);
-	ip[IP_LENGTH - 1] = '\0';
-}
-
 /*			Server 类			*/
 Server::Server(const char* _name, int _clients, ControlOption* cp): 
 	clients(_clients), ctrlOpt(cp), end(0), 
@@ -142,9 +131,9 @@ void Server::myClock_thd(Server* sp)
 	sp->thd_finished();
 }
 
-void Server::recv_thd(Server* sp)
+void Server::recv_thd(Server* sp, bool showLog)
 {
-	struct fd_set rdfs;
+	struct fd_set rfds;
 	// 键盘负载次数不超过 40 ，每 25 ms需要轮询一遍，即在最大连接 10 的情况下，每个连接只能等待 2.5 ms
 	struct timeval timeout = { 0,2 };
 	char buffer[BUFSIZE] = { 0 };
@@ -161,9 +150,9 @@ void Server::recv_thd(Server* sp)
 		for (int i = 1; i <= sp->clients; ++i)			// 通过 select I/O复用函数依次访问每个客户端SOCKET
 		{
 			if (socks[i] == INVALID_SOCKET) { --conn; continue;	}
-			FD_ZERO(&rdfs);
-			FD_SET(socks[i], &rdfs);
-			switch(::select(0, &rdfs, NULL, NULL, &timeout))
+			FD_ZERO(&rfds);
+			FD_SET(socks[i], &rfds);
+			switch(::select(0, &rfds, NULL, NULL, &timeout))
 			{
 			case -1:				// 连接已断开
 				::closesocket(socks[i]);
@@ -179,6 +168,7 @@ void Server::recv_thd(Server* sp)
 					socks[i] = INVALID_SOCKET;
 					continue;
 				}
+				if (ret == 0) continue;
 				// TODO: 缓冲区不足
 				unique_lock<mutex> locker_buf(sp->mt_buf);
 				// TODO
@@ -189,7 +179,7 @@ void Server::recv_thd(Server* sp)
 					locker_sign.unlock();
 					sp->cond_signal.notify_one();			// 唤醒等待发送信号的发送线程清空缓冲区
 					sp->cond_buf.wait(locker_buf);			// 等待缓冲区清空
-					}
+				}
 				sp->buf[sp->end++] = i;			// 客户端 ID
 				::memcpy(sp->buf + sp->end, buffer, sizeof(char) * ret);
 				sp->end += ret;
@@ -198,6 +188,7 @@ void Server::recv_thd(Server* sp)
 				sp->cond_buf.notify_one();
 			}
 		}
+		FD_ZERO(&rfds);
 		unique_lock<mutex> locker2_sock(sp->mt_sock);		// 保存副本
 		::memcpy(sp->clientsSock, socks, sizeof(sp->clientsSock));
 		locker2_sock.unlock();
@@ -223,36 +214,42 @@ void Server::send_thd(Server* sp, bool showLog)
 		sp->cond_sock.notify_one();
 		
 		unique_lock<mutex> locker_buf(sp->mt_buf);		// 获取缓冲区副本 并 清空缓冲
-		memcpy(buffer, sp->buf, sizeof(sp->buf));
+		::memcpy(buffer, sp->buf, sizeof(sp->buf));
+		::memset(sp->buf, 0, sizeof(sp->buf));
 		end_bk = sp->end;
 		// 清空缓冲区
 		sp->end = 0;
 		if (sp->ctrlOpt)
 		{
 			sp->buf[sp->end++] = 0;			// Server ID
-			int len = sp->ctrlOpt->createOpt(sp->buf + 1, BUFSIZE - 2);		// 内容
+			int len = sp->ctrlOpt->createOpt(sp->buf + sp->end, BUFSIZE - 2);		// 内容
 			if (len < 0) len = 0;
 			sp->end += len;
 			sp->buf[sp->end++] = MY_MSG_BOARD;		// 边界
 		}
 		sp->cond_buf.notify_one();
-		if (end_bk == 0) {
-			if (showLog) cerr << "SERVER: SEND THREAD: NO Message.\n";
-			continue;
-		}
+		if (end_bk == 0) continue;
 		buffer[end_bk] = '\0';
-		if (showLog) cerr << "SERVER: SEND THREAD: Send: " << buffer << endl;
-		for (int i = 1; i < sp->clients; ++i)		// 利用缓冲区副本进行发送
+		if (showLog) {
+			for (int i = 0; i < end_bk; ++i)
+			{
+				cerr << "SERVER: INDEX " << int(buffer[i++]) << "; ";
+				while (i < end_bk && buffer[i] != MY_MSG_BOARD)
+					cerr << buffer[i++];
+				cerr << endl;
+			}
+		}
+		for (int i = 1; i <= sp->clients; ++i)		// 利用缓冲区副本进行发送
 		{
 			if (socks[i] == INVALID_SOCKET) continue;
-			if (::send(socks[i], buffer, BUFSIZE, 0) < 0)
+			if (::send(socks[i], buffer, sizeof(char) * end_bk, 0) < 0)
 			{
 				if(showLog) cerr << "SERVER: SEND THREAD: ERROR Send To Index " << i << endl;
 				::closesocket(socks[i]);
 				socks[i] = INVALID_SOCKET;
 			}
 		}
-		if (showLog) cerr << "SERVER: SEND THREAD: ONCE SEND ALL OVER.\n";
+		//if (showLog) cerr << "SERVER: SEND THREAD: ONCE SEND ALL OVER. LENGTH " << end_bk << endl;
 		unique_lock<mutex> locker2_sock(sp->mt_sock);	//保存套接字副本
 		::memcpy(sp->clientsSock, socks, sizeof(sp->clientsSock));
 		locker2_sock.unlock();
@@ -269,27 +266,69 @@ void Server::thd_finished()
 	cond_thds.notify_one();
 }
 
-void Server::start(bool showLog)
+int Server::start(bool showLog)
 {
+	unsigned int bits = 0;				// 按位保存每一个客户端是否准备就绪状态
+	for (int i = 0; i < clients; ++i)
+		bits = (bits << 1) | 1;
+	
+	struct fd_set rfds;
+	struct timeval timeout = { 0,20 };
+	int cnt = clients;
+	char buffer[BUFSIZE] = { 0 };
+	int ret = 0;
+	while (bits != 0 && cnt != 0) {		// 等待所有客户端就绪
+		cnt = clients;
+		for (int i = 1; i <= clients; ++i) {
+			if (clientsSock[i] == INVALID_SOCKET) continue;
+			FD_ZERO(&rfds);
+			FD_SET(clientsSock[i], &rfds);
+			switch (::select(0, &rfds, NULL, NULL, &timeout)) {
+			case -1: --cnt; break;		// 连接断开
+			case 0:	break;				// 等待超时
+			default:
+				ret = ::recv(clientsSock[i], buffer, BUFSIZE, 0);
+				if (ret < 0) {
+					if (showLog) cerr << "SERVER: START: ERROR RECEIVE INDEX " << i << endl;
+					continue;
+				}
+				if (buffer[0] == MY_MSG_OK) {
+					bits ^= (1 << (i - 1));		// 异或运算，去除该位
+					if (showLog) cerr << "SERVER: START: OK INDEX " << i << " bits = " << bits << endl;
+				}
+			}
+		}
+	}
+	buffer[0] = (bits == 0) ? MY_MSG_OK : MY_MSG_FAILED;
+	int len = 1;
+	// TODO: 附带初始化信息
+	if (ctrlOpt) {
+		buffer[len++] = 0;
+		len += ctrlOpt->createOpt(buffer + len, BUFSIZE - 1);
+		buffer[len++] = MY_MSG_BOARD;
+	}
+	for (int i = 1; i <= clients; ++i) {		// 通知所有客户端都已经就绪
+		if (clientsSock[i] == INVALID_SOCKET) continue;
+		if (::send(clientsSock[i], buffer, sizeof(char) * len, 0) <= 0) {
+			if (showLog) cerr << "SERVER: SNED OK FAILED INDEX " << i << endl;
+			return SERV_ERROR_SOCK;
+		}
+	}
+	if (bits != 0) return SERV_ERROR_SOCK;
+
+	// 线程相关变量初始化
 	running = true;
 	thds_cnt = 3;
-	// 初始化
-	char opts[BUFSIZE] = { 0 };
 	end = 0;
-	if (ctrlOpt)
-	{
-		buf[end++] = 0;			// Server ID
-		int len = ctrlOpt->createOpt(buf + 1, BUFSIZE - 2);		// 内容
-		if (len < 0) len = 0;
-		end += len;
-		buf[end++] = MY_MSG_BOARD;		// 边界
-	}
+	signal_send = false;
+
 	thread clk(myClock_thd, this);
-	thread recv(recv_thd, this);
+	thread recv(recv_thd, this, showLog);
 	thread send(send_thd, this, showLog);
 	clk.detach();
 	recv.detach();
 	send.detach();
+	return SERV_SUCCESS;
 }
 
 void Server::stop()

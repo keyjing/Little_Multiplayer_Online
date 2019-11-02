@@ -16,7 +16,9 @@
 #define SERV_ERROR_SOCK		-1
 #define SERV_ERROR_NO_MC	-2
 
-#define MY_MSG_BOARD		-1				// 数据边界
+#define MY_MSG_BOARD		' '				// 数据边界
+#define MY_MSG_OK			' '
+#define MY_MSG_FAILED		-1
 
 class ControlOption				// Interface: 服务器的控制命令产生
 {
@@ -54,10 +56,9 @@ class Server
 	std::mutex mt_thds;
 	std::condition_variable cond_thds;
 
-	static void myClock_thd(Server* sp);		// 时钟线程调用函数，产生发送信号
-	static void recv_thd(Server* sp);			// 接收线程调用函数，存入缓冲区，若满产生发送信号
-	static void send_thd(Server* sp, 
-		bool showLog = false);					// 发送线程调用函数，清空缓冲
+	static void myClock_thd(Server* sp);							// 时钟线程调用函数，产生发送信号
+	static void recv_thd(Server* sp, bool showLog = false);			// 接收线程调用函数，存入缓冲区，若满产生发送信号
+	static void send_thd(Server* sp, bool showLog = false);			// 发送线程调用函数，清空缓冲
 	void thd_finished();			// 线程结束收尾操作，线程数减一
 public:
 	Server(const char* _name, int _clients, ControlOption* cp);
@@ -66,7 +67,7 @@ public:
 
 	int waitConnect(bool openMulticast, bool showLog = false);
 
-	void start(bool showLog = false);
+	int start(bool showLog = false);
 
 	void stop();			//向工作线程发出停止信号
 };
