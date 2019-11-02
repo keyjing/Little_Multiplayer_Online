@@ -1,8 +1,5 @@
 #include<iostream>
 
-#include"MyWSAInfo.h"
-
-
 using namespace std;
 
 int main()

@@ -21,46 +21,54 @@
 class ControlOption				// Interface: 服务器的控制命令产生
 {
 public:
-	virtual char createOpt() = 0;
+	virtual int createOpt(char* dst, int maxlen) = 0;
 };
 
 class Server
 {
 	char name[BUFSIZE] = { 0 };				// 服务器名
-	int clients = 0;						// 控制的客户端数，包括 hostReserve
-	//int hostReserve = 1;					// 保留的客户端数，默认保留一个为服务器专用
+	int clients = 0;						// 控制的客户端数，标号从 1 开始，0 为系统标号
+
+	/*		套接字数组、互斥锁和条件变量	*/
 	SOCKET clientsSock[MAX_CONNECT] = { INVALID_SOCKET };	// 与客户端连接的套接字
-	//char options[MAX_CONNECT];				// 各个客服端的操作指令，默认下标 0 为 Server 发布的控制指令
+	std::mutex mt_sock;
+	std::condition_variable cond_sock;
+
+	/*		Server 的控制信号产生器			*/
 	ControlOption* ctrlOpt = nullptr;		// Server控制指令产生的接口
 
-	char msg[BUFSIZE];
+	/*		消息缓冲、互斥锁和条件变量		*/
+	char buf[BUFSIZE] = { 0 };
 	int end = 0;
-	std::mutex mt_msg;
-	std::condition_variable cond_msg;
+	std::mutex mt_buf;			
+	std::condition_variable cond_buf;
 
+	/*		发送信号、互斥锁和条件变量		*/
 	bool signal_send;
 	std::mutex mt_signal;
 	std::condition_variable cond_signal;
 
-	volatile bool running;
-	int thds_cnt;
+	/*		线程相关	*/
+	volatile bool running;			// 要求线程执行状态
+	int thds_cnt;					// 正执行的线程数
 	std::mutex mt_thds;
 	std::condition_variable cond_thds;
 
-	static void myClock_thd(Server* sp);
-	static void recv_thd(Server* sp);
-	static void send_thd(Server* sp);
-
+	static void myClock_thd(Server* sp);		// 时钟线程调用函数，产生发送信号
+	static void recv_thd(Server* sp);			// 接收线程调用函数，存入缓冲区，若满产生发送信号
+	static void send_thd(Server* sp, 
+		bool showLog = false);					// 发送线程调用函数，清空缓冲
+	void thd_finished();			// 线程结束收尾操作，线程数减一
 public:
-	Server(const char* _name, int _clients);
+	Server(const char* _name, int _clients, ControlOption* cp);
 
 	~Server();
 
 	int waitConnect(bool openMulticast, bool showLog = false);
 
-	void startWork();
+	void start(bool showLog = false);
 
-	void stop() {  }	//向工作线程发出停止信号
+	void stop();			//向工作线程发出停止信号
 };
 
 #endif

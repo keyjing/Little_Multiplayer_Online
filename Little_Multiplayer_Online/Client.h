@@ -1,7 +1,7 @@
 #ifndef _Client_h
 #define _Client_h
 
-#include"MyWSAInfo.h"
+#include"Multicast.h"
 #include"Server.h"
 
 #define CLIENT_SUCCESS	0

@@ -21,9 +21,19 @@ int main()
 
 	if (ch == 's') {
 		thread thds([=]() {
-			Server server("CS_TEST", 1);
+			Server server("CS_TEST", 1, nullptr);
 			cout << "SERVER: Waiting Connect: " << endl;
 			server.waitConnect(true, true);			// OPEN MULTICAST AND SHOW LOG
+			Sleep(1000);
+			cout << "SERVER: Provide server until press 'q'!" << endl;
+			cout << "SERVER: With log showing? (y/n): ";
+			char ch;
+			while ((ch = _getch()) != 'y' && ch != 'n');
+			cout << endl << "SERVER: Starting..." << endl;
+			server.start(ch == 'y');
+			while ((ch = _getch()) != 'q');
+			server.stop();
+			cout << "SERVER: OVER!" << endl;
 		});
 		thread thdc([=]() {
 
@@ -32,7 +42,7 @@ int main()
 			getLocalIP(local_ip);
 			cout << "CLIENT: Local Connect: " << endl;
 			localClient.connectServer("127.0.0.1", true);		// 也可以用 "127.0.0.1"
-
+			Sleep(2000);
 
 		});
 		thds.join();

@@ -29,7 +29,7 @@ class Multicast
 public:
 
 	Multicast(const char* ip_addr,  int _port) {		//通过 多播地址 和 端口 创建多播
-		memcpy(&multi_ip, ip_addr, IP_LENGTH * sizeof(char));
+		::memcpy(&multi_ip, ip_addr, IP_LENGTH * sizeof(char));
 		port = _port;
 		WSADATA wsa;
 		::WSAStartup(MAKEWORD(2, 2), &wsa);

@@ -2,10 +2,7 @@
 #include<iostream>
 #include<exception>
 
-using std::thread;
-using std::cerr;
-using std::mutex;
-using std::unique_lock;
+using namespace std;
 
 /*			辅助函数			*/
 static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
@@ -38,10 +35,11 @@ static void getLocalIP(char* ip)					// 获取当前主机 IP
 }
 
 /*			Server 类			*/
-Server::Server(const char* _name, int _clients)
+Server::Server(const char* _name, int _clients, ControlOption* cp): 
+	clients(_clients), ctrlOpt(cp), end(0), 
+	signal_send(false), running(false), thds_cnt(0)
 {
 	memcpy(name, _name, strlen(_name) + 1);
-	clients = _clients;
 	if (clients < 0) clients = 0;
 	else if (clients > MAX_CONNECT) clients = MAX_CONNECT;
 	WSADATA wsa;
@@ -68,7 +66,7 @@ int Server::waitConnect(bool openMulticast, bool showLog)
 	memset(&local, 0, sizeof(sockaddr_in));
 	local.sin_family = AF_INET;
 	local.sin_port = htons(SERV_PORT);
-	inet_pton(AF_INET, INADDR_ANY, &local.sin_addr);	// 接收该端口的所有消息
+	::inet_pton(AF_INET, INADDR_ANY, &local.sin_addr);	// 接收该端口的所有消息
 	//将套接字由主动发送改为被动接收
 	if (bind(sock, (SOCKADDR*)&local, sizeof(SOCKADDR)) == SOCKET_ERROR) {
 		closesocket(sock);
@@ -131,97 +129,175 @@ int Server::waitConnect(bool openMulticast, bool showLog)
 	return 0;
 }
 
-void Server::startWork()
+void Server::myClock_thd(Server* sp)
 {
+	while (sp->running)
+	{
+		this_thread::sleep_for(chrono::milliseconds(20));		// 每 20 ms产生一次时钟信号
+		unique_lock<mutex> locker_sign(sp->mt_signal);
+		sp->signal_send = true;
+		locker_sign.unlock();
+		sp->cond_signal.notify_one();
+	}
+	sp->thd_finished();
 }
 
-//void Server::recvEveryOption()
-//{	
-//	struct fd_set rfds;
-//	/* 键盘负载次数不超过 40 ，每 25 ms需要轮询一遍
-//	*  即在最大连接 10 的情况下，每个连接只能等待 2.5 ms
-//	*/
-//	struct timeval timeout = { 0, 2 };
-//	int cnt = clients;
-//	char buffer[BUFSIZE];
-//	int ret = -1;
-//	unique_lock<mutex> locker(msg_mt);
-//	try {
-//		while (cnt > 0) {
-//			for (int i = 1; i <= clients; ++i) {	// clientsSock[0] 保留不使用
-//				if (clientsSock[i] == INVALID_SOCKET) {
-//					--cnt; continue;
-//				}
-//				FD_ZERO(&rfds);
-//				FD_SET(clientsSock[i], &rfds);
-//				switch (select(0, &rfds, NULL, NULL, &timeout))		// 通过 select 查询是否可读
-//				{
-//				case -1:		// 连接断开 
-//					::closesocket(clientsSock[i]);
-//					clientsSock[i] = INVALID_SOCKET;
-//					break;
-//				case 0: break;		// 等待超时
-//				default:		// 可读
-//					ret = recv(clientsSock[i], buffer, BUFSIZE, 0);
-//					if (ret < 0) {
-//						cerr << "ERROR: Receive From " + char(i + '0') + '\n';
-//						::closesocket(clientsSock[i]);
-//						clientsSock[i] = INVALID_SOCKET;
-//						break;
-//					}
-//					// TODO: 连续两次马上发送一次
-//					locker.lock();
-//					if()
-//				}
-//			}
-//		}
-//	}
-//	catch (const std::exception & e) {
-//		cerr << "Receive From Clients ERROR!\n";
-//	}
-//}
-//
-//
-//void Server::timeCount()
-//{
-//	while (working) {
-//		if (time_reset)
-//			time_reset = false;
-//		else
-//			send_signal = true;
-//		::Sleep(20);
-//	}
-//}
-//
-//void Server::sendEachOptionS()
-//{
-//	while (working) { 
-//		while (!send_signal) ::Sleep(2);		// 等待发送信号
-//		char buffer[BUFSIZE];					// 获取发送副本
-//		options_mt.lock();
-//		::memcpy(buffer, options, sizeof(options));		// 内存复制获取副本
-//		::memset(options, 0, sizeof(options));			// 原 options 清空
-//		options[0] = ctrlOpt->createOpt();				// 生成下一次的控制信号
-//		options_mt.unlock();
-//		send_signal = false;
-//		// 根据副本进行群发
-//		for (int i = hostReserve; i <= clients; ++i) {			// TCP全双工，接收发送两不误
-//			if (clientsSock[i] == INVALID_SOCKET) continue;
-//			if (send(clientsSock[i], buffer, clients + 1, 0) < 0) {
-//				cerr << "ERROR: Send to index " + char(i + '0') + '\n';
-//			}
-//		}
-//	}
-//}
-//
-//void Server::working_thd(Server* sp)
-//{
-//	sp->is_working_thd_stop = false;		// 工作线程状态：执行
-//	sp->working = true;
-//	while (sp->working) {		// 直到接收 结束 信号结束
-//		
-//
-//
-//	}
-//	sp->is_working_thd_stop = true;			// 工作线程状态：结束
-//}
+void Server::recv_thd(Server* sp)
+{
+	struct fd_set rdfs;
+	// 键盘负载次数不超过 40 ，每 25 ms需要轮询一遍，即在最大连接 10 的情况下，每个连接只能等待 2.5 ms
+	struct timeval timeout = { 0,2 };
+	char buffer[BUFSIZE] = { 0 };
+	int ret = -1;
+	SOCKET socks[MAX_CONNECT] = { INVALID_SOCKET };
+	int conn = sp->clients;
+	while (sp->running && conn > 0)
+	{
+		conn = sp->clients;			// 每次检测是否全部断开
+		unique_lock<mutex> locker_sock(sp->mt_sock);		// 获取副本
+		::memcpy(socks, sp->clientsSock, sizeof(sp->clientsSock));
+		locker_sock.unlock();
+		sp->cond_sock.notify_one();
+		for (int i = 1; i <= sp->clients; ++i)			// 通过 select I/O复用函数依次访问每个客户端SOCKET
+		{
+			if (socks[i] == INVALID_SOCKET) { --conn; continue;	}
+			FD_ZERO(&rdfs);
+			FD_SET(socks[i], &rdfs);
+			switch(::select(0, &rdfs, NULL, NULL, &timeout))
+			{
+			case -1:				// 连接已断开
+				::closesocket(socks[i]);
+				socks[i] = INVALID_SOCKET;
+				break;
+			case 0: break;			// 等待超时
+			default:				// 可读
+				ret = ::recv(socks[i], buffer, BUFSIZE, 0);
+				if (ret < 0)
+				{
+					cerr << "SERVER: ERROR Receive Form Index " << i << "\n";
+					::closesocket(socks[i]);
+					socks[i] = INVALID_SOCKET;
+					continue;
+				}
+				// TODO: 缓冲区不足
+				unique_lock<mutex> locker_buf(sp->mt_buf);
+				// TODO
+				if (ret > BUFSIZE - 4) continue;
+				while (sp->end + ret + 2 > BUFSIZE) {			// TODO：ret 大于 BUFSIZE - 2 - 2 时会发生死循环
+					unique_lock<mutex> locker_sign(sp->mt_signal);		// 立即发出一个时钟发送信号
+					sp->signal_send = true;
+					locker_sign.unlock();
+					sp->cond_signal.notify_one();			// 唤醒等待发送信号的发送线程清空缓冲区
+					sp->cond_buf.wait(locker_buf);			// 等待缓冲区清空
+					}
+				sp->buf[sp->end++] = i;			// 客户端 ID
+				::memcpy(sp->buf + sp->end, buffer, sizeof(char) * ret);
+				sp->end += ret;
+				sp->buf[sp->end++] = MY_MSG_BOARD;	// 消息的边界符号
+				locker_buf.unlock();
+				sp->cond_buf.notify_one();
+			}
+		}
+		unique_lock<mutex> locker2_sock(sp->mt_sock);		// 保存副本
+		::memcpy(sp->clientsSock, socks, sizeof(sp->clientsSock));
+		locker2_sock.unlock();
+		sp->cond_sock.notify_one();
+	}
+	sp->thd_finished();
+	if (conn <= 0) {			// 客户端全部断开时终止 Server 服务
+		//sp->stop();
+		sp->running = false;
+		cerr << "SERVER: All Clients Disconnected.\n";
+	}
+}
+
+void Server::send_thd(Server* sp, bool showLog)
+{
+	SOCKET socks[MAX_CONNECT] = { INVALID_SOCKET };
+	char buffer[BUFSIZE + 1] = { 0 };
+	int end_bk = 0;
+	while (sp->running) {
+		unique_lock<mutex> locker_sock(sp->mt_sock);	//获取套接字副本
+		::memcpy(socks, sp->clientsSock, sizeof(sp->clientsSock));
+		locker_sock.unlock();
+		sp->cond_sock.notify_one();
+		
+		unique_lock<mutex> locker_buf(sp->mt_buf);		// 获取缓冲区副本 并 清空缓冲
+		memcpy(buffer, sp->buf, sizeof(sp->buf));
+		end_bk = sp->end;
+		// 清空缓冲区
+		sp->end = 0;
+		if (sp->ctrlOpt)
+		{
+			sp->buf[sp->end++] = 0;			// Server ID
+			int len = sp->ctrlOpt->createOpt(sp->buf + 1, BUFSIZE - 2);		// 内容
+			if (len < 0) len = 0;
+			sp->end += len;
+			sp->buf[sp->end++] = MY_MSG_BOARD;		// 边界
+		}
+		sp->cond_buf.notify_one();
+		if (end_bk == 0) {
+			if (showLog) cerr << "SERVER: SEND THREAD: NO Message.\n";
+			continue;
+		}
+		buffer[end_bk] = '\0';
+		if (showLog) cerr << "SERVER: SEND THREAD: Send: " << buffer << endl;
+		for (int i = 1; i < sp->clients; ++i)		// 利用缓冲区副本进行发送
+		{
+			if (socks[i] == INVALID_SOCKET) continue;
+			if (::send(socks[i], buffer, BUFSIZE, 0) < 0)
+			{
+				if(showLog) cerr << "SERVER: SEND THREAD: ERROR Send To Index " << i << endl;
+				::closesocket(socks[i]);
+				socks[i] = INVALID_SOCKET;
+			}
+		}
+		if (showLog) cerr << "SERVER: SEND THREAD: ONCE SEND ALL OVER.\n";
+		unique_lock<mutex> locker2_sock(sp->mt_sock);	//保存套接字副本
+		::memcpy(sp->clientsSock, socks, sizeof(sp->clientsSock));
+		locker2_sock.unlock();
+		sp->cond_sock.notify_one();
+	}
+	sp->thd_finished();
+}
+
+void Server::thd_finished()	
+{
+	unique_lock<mutex> locker_thds(mt_thds);
+	thds_cnt--;
+	locker_thds.unlock();
+	cond_thds.notify_one();
+}
+
+void Server::start(bool showLog)
+{
+	running = true;
+	thds_cnt = 3;
+	// 初始化
+	char opts[BUFSIZE] = { 0 };
+	end = 0;
+	if (ctrlOpt)
+	{
+		buf[end++] = 0;			// Server ID
+		int len = ctrlOpt->createOpt(buf + 1, BUFSIZE - 2);		// 内容
+		if (len < 0) len = 0;
+		end += len;
+		buf[end++] = MY_MSG_BOARD;		// 边界
+	}
+	thread clk(myClock_thd, this);
+	thread recv(recv_thd, this);
+	thread send(send_thd, this, showLog);
+	clk.detach();
+	recv.detach();
+	send.detach();
+}
+
+void Server::stop()
+{
+	unique_lock<mutex> locker_thds(mt_thds);
+	while (thds_cnt > 0) {
+		running = false;
+		cond_thds.wait(locker_thds);
+	}
+	locker_thds.unlock();
+}
