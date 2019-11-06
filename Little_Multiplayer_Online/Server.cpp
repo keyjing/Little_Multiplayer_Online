@@ -7,6 +7,11 @@ using namespace std;
 
 Server* Server::sp = nullptr;
 
+#ifdef _DEBUG
+static volatile int recv_cnt = 0;
+static volatile int send_cnt = 0;
+#endif // _DEBUG
+
 /*			辅助函数			*/
 static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
 {
@@ -36,48 +41,7 @@ Server::~Server()
 	::WSACleanup();
 }
 
-void Server::setName(const char* src)
-{
-	int len = strlen(src);
-	if (len >= BUFSIZE) len = BUFSIZE - 1;
-	::memcpy(name, src, sizeof(char) * len);
-	name[len] = '\0';
-}
-
-//void Server::cpyName(char* dst, int maxlen) const
-//{
-//	int len = (maxlen < BUFSIZE) ? maxlen : BUFSIZE;
-//	::memcpy(dst, name, sizeof(char) * len);
-//	dst[len - 1] = '\0';
-//}
-
-void Server::setClients(int num)
-{
-	clients = num;
-	if (clients < 0) clients = 0;
-	else if (clients > MAX_CONNECT) clients = MAX_CONNECT;
-}
-
-//void Server::setClientsSock(int index, SOCKET sock)
-//{
-//	if (index < 0 || index > MAX_CONNECT) return;
-//	clientsSock[index] = sock;
-//}
-//
-//void Server::cpyClientsSock(SOCKET* dst, int maxlen)
-//{
-//	int len = (maxlen < MAX_CONNECT + 1) ? maxlen : MAX_CONNECT + 1;
-//	::memcpy(dst, clientsSock, sizeof(SOCKET) * len);
-//}
-//
-//SOCKET Server::getClientsSock(int index)
-//{
-//	if (index < 0 || index > MAX_CONNECT) return INVALID_SOCKET;
-//	return clientsSock[index];
-//}
-
-
-void Server::waitConnect(void)
+void Server::waitConnect(const char* servName, int servPort, const char* mc_ip, int mc_port)
 {
 	Server* sp = Server::getInstance();
 	// 创建套接字
@@ -88,9 +52,9 @@ void Server::waitConnect(void)
 	}
 	// 设置地址和端口
 	sockaddr_in local;
-	memset(&local, 0, sizeof(sockaddr_in));
+	::memset(&local, 0, sizeof(sockaddr_in));
 	local.sin_family = AF_INET;
-	local.sin_port = htons(SERV_PORT);
+	local.sin_port = htons(servPort);
 	::inet_pton(AF_INET, INADDR_ANY, &local.sin_addr);	// 接收该端口的所有消息
 	// 将套接字由主动发送改为被动接收
 	if (bind(sock, (SOCKADDR*)&local, sizeof(SOCKADDR)) == SOCKET_ERROR) {
@@ -105,8 +69,10 @@ void Server::waitConnect(void)
 		return;
 	}
 	//打开多播
-	Multicast mc(SERV_MC_ADDR, SERV_MC_PORT);
-	if (mc.sender(sp->name) < 0) {
+	Multicast mc(mc_ip, mc_port);
+	char msg[BUFSIZE] = { 0 };
+	sprintf_s(msg, "%d %s", servPort, servName);
+	if (mc.sender(msg) < 0) {
 		MyEasyLog::write(LOG_ERROR, "SERVER MULTICAST", "Open Multicast FAILED!");
 		closesocket(sock);
 		return;
@@ -226,7 +192,10 @@ void Server::recv_thd(void)
 					sp->cond_msg.wait(locker_msg);			// 等待缓冲区清空
 				}
 				sp->msg[sp->msg_endpos++] = i;				// 客户端 ID
-				::memcpy(sp->msg + sp->msg_endpos, buffer, sizeof(char) * ret);
+				::memcpy(sp->msg + sp->msg_endpos, buffer, sizeof(char) * ret);	
+#ifdef _DEBUG
+				recv_cnt += ret;	// 统计接收字节数
+#endif // _DEBUG
 				sp->msg_endpos += ret;
 				sp->msg[sp->msg_endpos++] = MY_MSG_BOARD;	// 消息的边界符号
 				locker_msg.unlock();
@@ -275,8 +244,9 @@ void Server::send_thd(void)
 		}
 		locker_msg.unlock();
 		sp->cond_msg.notify_one();
+
 		if (end_bk == 0) continue;
-		buffer[end_bk] = '\0';
+
 #ifdef _DEBUG	// 只在 DEBUG 模式下将发送信息写入日志
 		ostringstream ostr;
 		ostr << endl;
@@ -284,7 +254,10 @@ void Server::send_thd(void)
 		{
 			ostr << "INDEX " << int(buffer[i++]) << ": ";
 			while (i < end_bk && buffer[i] != MY_MSG_BOARD)
+			{
 				ostr << buffer[i++];
+				send_cnt++;		// 统计发送字节数
+			}
 			ostr << endl;
 		}
 		MyEasyLog::write(LOG_NOTICE, "SERVER SEND MESSAGE", ostr.str());
@@ -316,9 +289,16 @@ void Server::thd_finished()
 	cond_thds.notify_one();
 }
 
-int Server::start(void)
+int Server::start(const char* servName, int servPort, int clients, const char* mc_ip, int mc_port)
 {
-	thread conn_thd(waitConnect);
+	// 若有，关闭之前连接
+	stop();
+	for (int i = 0; i < MAX_CONNECT + 1; ++i)
+		if (clientsSock[i] != INVALID_SOCKET) ::closesocket(clientsSock[i]);
+
+	this->clients = clients;
+	
+	thread conn_thd(waitConnect, servName, servPort, mc_ip, mc_port);
 	conn_thd.join();
 
 	unsigned int bits = 0;				// 按位保存每一个客户端是否准备就绪状态
@@ -397,4 +377,8 @@ void Server::stop()
 	}
 	locker_thds.unlock();
 	MyEasyLog::write(LOG_NOTICE, "SERVER THREAD", "All Thread Stop.");
+#ifdef _DEBUG
+	MyEasyLog::write(LOG_NOTICE, "SERVER RECV COUNT", (int)recv_cnt);
+	MyEasyLog::write(LOG_NOTICE, "SERVER SEND COUNT", (int)send_cnt);
+#endif // _DEBUG
 }
