@@ -15,11 +15,15 @@
 #define MC_SOCK_FAILED		-3		//创建套接字失败
 #define MC_NO_RECEVICE		-4		//没有接收到多播
 
+#define MAX_FOUND_SERVER	20
+
 #define IP_LENGTH			16
 #define BUFSIZE				1024
 
 #define MC_DEFAULT_ADDR		"230.0.0.1"
 #define MC_DEFAULT_PORT		2333
+
+long long getHashOfIP(const char* ip);		// 获取 IP 字符串的 Hash 值
 
 class Multicast
 {
@@ -53,10 +57,6 @@ private:
 
 	void thd_finished();
 
-	//volatile bool multi_status_on = false;		//多播状态，多线程访问需要加 volatile
-
-	//volatile bool thd_running = false;
-	//void turnOn() { multi_status_on = true; }
 	static void send_thd(Multicast* mc, const char* msg);
 };
 

@@ -12,25 +12,6 @@ static volatile int recv_cnt = 0;
 static volatile int send_cnt = 0;
 #endif // _DEBUG
 
-/*			辅助函数			*/
-static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
-{
-	if (ip == NULL || ip[0] == '\0')
-		return 0;
-	int sub[4] = { 0 };
-	int k = 0;
-	for (int i = 0; i < IP_LENGTH && ip[i] != '\0'; ++i) {
-		if (ip[i] >= '0' && ip[i] <= '9')
-			sub[k] = sub[k] * 10 + ip[i] - '0';
-		else if (++k == 4)
-			break;
-	}
-	long long res = 0;
-	for (int i = 0; i < 4; ++i)
-		res = (res << 8) + sub[i];
-	return res;
-}
-
 /*			Server 类			*/
 Server::~Server()
 {

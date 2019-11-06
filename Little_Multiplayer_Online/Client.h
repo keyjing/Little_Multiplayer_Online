@@ -4,12 +4,20 @@
 #include"Multicast.h"
 #include"Server.h"
 
-#define MAX_FOUND_SERVER	20
 #define NO_FOUND_SERVER		-1
 #define FOUND_SERV_OVERFLOW	-2
 
 #define CLIENT_SUCCESS		0
 #define CLIENT_ERROR		-1
+
+// 找到的服务器列表结构体
+struct FoundServerResult {
+	char name[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
+	char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
+	int port[MAX_FOUND_SERVER] = { 0 };
+	int found = 0;
+};
+
 
 // 单例模式
 class Client
@@ -27,10 +35,9 @@ public:
 	// @ mc_ip, mc_port: 多播 IP 和端口
 	// @ maxfound: 最大查找个数
 	// @ time_limit: 限制时间，单位为毫秒
-	// @ servName, servIP, servPort: 服务器名、IP、端口
+	// @ fdservs: 服务器名、IP、端口
 	// 返回值: 找到的个数
-	int findServer(const char* mc_ip, int mc_port, int maxfound, int time_limit, 
-		char servName[][BUFSIZE], char servIP[][IP_LENGTH], int servPort[]);
+	int findServer(const char* mc_ip, int mc_port, int maxfound, int time_limit, FoundServerResult& fdservs);
 
 	int addOpts(const char* opts, int len);				// 向发送数据缓冲区写入新数据
 

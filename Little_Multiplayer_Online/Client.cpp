@@ -16,29 +16,10 @@ Client::~Client()
 	::WSACleanup();
 }
 
-int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_limit,
-	char servName[][BUFSIZE], char servIP[][IP_LENGTH], int servPort[])
+// 进行消息挑选，找出正确的服务器
+static int checkMessage(const char msg[][BUFSIZE], const char ip[][IP_LENGTH], int found, FoundServerResult& fdservs)
 {
-	if (mc_port < 0 || mc_port >= (1 << 16)) {
-		MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER", "Multicast port INVALID.");
-		return CLIENT_ERROR;
-	}
-	if (maxfound > MAX_FOUND_SERVER) {
-		MyEasyLog::write(LOG_WARNING, "CLIENT FOUND SERVER", "OVERFLOW");
-		return FOUND_SERV_OVERFLOW;
-	}
-	char msg[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
-	char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
-	Multicast mc(mc_ip, mc_port);
-	int found = mc.receiver(maxfound, time_limit, msg, ip);
-	mc.turnOff();
-	if (found <= 0) 
-	{
-		MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER", "FAILED");
-		return NO_FOUND_SERVER;
-	}
-	// TODO: 消除错误的信息
-	int realfound = 0;
+	fdservs.found = 0;
 	int pos = -1;
 	while (++pos < found)
 	{
@@ -46,7 +27,7 @@ int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_li
 		char found_name[BUFSIZE] = { 0 };
 		try {
 			int i = 0;
-			while(msg[pos][i] >= '0' && msg[pos][i] <= '9')
+			while (msg[pos][i] >= '0' && msg[pos][i] <= '9')
 				found_port = found_port * 10 + (msg[pos][i++] - '0');
 			if (i == 0)		// 不符合格式，丢弃 
 				continue;
@@ -62,23 +43,48 @@ int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_li
 			MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER CATCH MSG", msg[pos]);
 			continue;
 		}
-		::memcpy(servName[realfound], found_name, sizeof(char) * BUFSIZE);
-		::memcpy(servIP[realfound], ip[pos], sizeof(char) * IP_LENGTH);
-		servPort[realfound] = found_port;
-		++realfound;
+		::memcpy(fdservs.name[fdservs.found], found_name, sizeof(char) * BUFSIZE);
+		::memcpy(fdservs.ip[fdservs.found], ip[pos], sizeof(char) * IP_LENGTH);
+		fdservs.port[fdservs.found] = found_port;
+		++fdservs.found;
 	}
-#ifdef DEBUG
-	if (realfound == 0)
+#ifdef _DEBUG
+	if (fdservs.found == 0)
 		MyEasyLog::write(LOG_NOTICE, "CLIENT FIND SERVER", "NO Real FOUND");
 	else
 	{
 		ostringstream ostr;
-		for (int i = 0; i < realfound; ++i)
-			ostr << endl << i << ". " << servName[i] << " " << servIP[i] << " " << servPort[i];
+		for (int i = 0; i < fdservs.found; ++i)
+			ostr << endl << i << ". " << fdservs.name[i] << " " << fdservs.ip[i] << " " << fdservs.port[i];
 		MyEasyLog::write(LOG_NOTICE, "CLIENT FIND SERVER", ostr.str());
 	}
 #endif // DEBUG
-	return realfound;
+	return fdservs.found;
+}
+
+int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_limit, FoundServerResult& fdservs)
+{
+	if (mc_port < 0 || mc_port >= (1 << 16)) {
+		MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER", "Multicast port INVALID.");
+		return CLIENT_ERROR;
+	}
+	if (maxfound > MAX_FOUND_SERVER) {
+		MyEasyLog::write(LOG_WARNING, "CLIENT FOUND SERVER", "OVERFLOW");
+		return FOUND_SERV_OVERFLOW;
+	}
+	char msg[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
+	char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
+
+	Multicast mc(mc_ip, mc_port);
+	int found = mc.receiver(maxfound, time_limit, msg, ip);
+	mc.turnOff();
+	if (found < 0) 
+	{
+		MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER", "FAILED");
+		return NO_FOUND_SERVER;
+	}
+	// TODO: 消除错误的信息
+	return checkMessage(msg, ip, found, fdservs);
 }
 
 int Client::connServer(const char* server_ip, int serv_port)

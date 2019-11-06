@@ -14,6 +14,9 @@
 
 #define MY_MAIN_TITLE			"2048小游戏"
 
+#define DEFAULT_SERV_PORT		"1234"
+#define MAX_FOUND_TIME			3000
+
 #define MAX_LOADSTRING			100
 #define MY_GAME_SIZE			4			// 游戏盘格式: 4x4
 #define MY_WIN_WIDTH			1000		// 窗口宽度
@@ -43,15 +46,27 @@ WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 
 // TODO: 全局数据
-int players = 0;
+Server* sp = nullptr;
+Client* cp = nullptr;
+
+struct FoundServerResult fdservs;
+
+//int players = 0;
 
 // TODO: 全局控件
 HWND hmainFrame;		// 主界面
+
 HWND hservFrame;		// 创建服务器界面
-HWND htxt_name;
-HWND htxt_players;
-HWND hclientFrame;		// 客户端界面
-HWND hlist_serv_name;
+HWND htxt_name;			// 服务器名
+HWND htxt_players;		// 人数
+HWND htxt_port;			// 端口
+HWND htxt_mc_ip;		// 多播地址
+HWND htxt_mc_port;		// 多播端口
+
+HWND hclientFrame;			// 客户端界面
+HWND hlist_serv_name;		// 服务器列表
+HWND htxt_found_mc_ip;		// 查找多播地址
+HWND htxt_found_mc_port;	// 查找多播端口
 
 HWND htabFrame[8];									// 游戏盘所在 Frame
 HWND hGameTable[8][MY_GAME_SIZE][MY_GAME_SIZE];		// 游戏盘控件， 8人的 4X4
@@ -64,16 +79,19 @@ LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 // TODO: 添加自己函数的向前声明:
-void		initGameTable(HWND, int);
-void		initMainFrame(HWND);
-void		initServFrame(HWND);
-void		initClientFrame(HWND);
+void	initGameTable(HWND, int);		// 创建游戏界面
+void	initMainFrame(HWND);			// 创建主界面
+void	initServFrame(HWND);			// 创建服务器界面
+void	initClientFrame(HWND);			// 创建客户端界面
+void	freshListBox(HWND);				// 刷新客户端界面的选择列表
+void	GetServFrameMsg(HWND);			// 获取服务端界面的信息，并进行处理
+void	GetClientFrameMsg(HWND);		// 获取客户端界面的信息，并进行处理
+void	wcharToArrayChar(char*, const WCHAR*);
+int		wcharToInt(const WCHAR*);
 
 // 原始的静态文本消息响应及自定义的消息响应
-WNDPROC OriginStaticProc;
-LRESULT CALLBACK MyStaticProc(HWND, UINT, WPARAM, LPARAM);
-
-void		freshListBox(void);
+WNDPROC	OriginStaticProc;									// 静态区域控件原本的响应函数	
+LRESULT CALLBACK MyStaticProc(HWND, UINT, WPARAM, LPARAM);	// 自定义静态区域控件响应函数
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -285,63 +303,25 @@ LRESULT CALLBACK MyStaticProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 			switch (wmId)
 			{
 			case IDB_CREATE_ROOM:
+				sp = Server::getInstance();
 				ShowWindow(hmainFrame, SW_HIDE);
 				ShowWindow(hservFrame, SW_SHOW);
 				break;
 			case IDB_JOIN_ROOM:
+				cp = Client::getInstance();
 				ShowWindow(hmainFrame, SW_HIDE);
 				ShowWindow(hclientFrame, SW_SHOW);
+				freshListBox(hWnd);
 				break;
 			case IDB_SERV_OK:
-			{	
-				// TODO: 获取编辑框文本
-				int len = ::SendMessage(htxt_name, WM_GETTEXTLENGTH, NULL, NULL);
-				WCHAR buf[256] = { 0 };
-				::SendMessage(htxt_name, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
-				//::MessageBox(NULL, buf, L"NAME", NULL);
-
-				int len2 = ::SendMessage(htxt_players, WM_GETTEXTLENGTH, NULL, NULL);
-				//if (len2 >= 2) {
-				//	::MessageBox(hWnd, L"人数限制：1 ~ 8", L"超出范围", NULL);
-				//	break;
-				//}
-				WCHAR buf2[256] = { 0 };
-				::SendMessage(htxt_players, WM_GETTEXT, (WPARAM)len2 + 1, (LPARAM)buf2);
-				USES_CONVERSION;
-				char* p = W2A(buf2);
-				players = 0;
-				for (int i = 0; p[i] >= '0' && p[i] <= '9'; ++i)
-					players = players * 10 + (p[i] - '0');
-				char buf3[256] = { 0 };
-				sprintf_s(buf3, "玩家数： %d", players);
-				WCHAR* wp = A2W(buf3);
-				if (players <= 0 || players > 8) {
-					::MessageBox(hWnd, L"人数限制：1 ~ 8", L"超出范围", NULL);
-					break;
-				}
-				::MessageBox(hWnd, wp, L"MESSAGE", NULL);
-
-				ShowWindow(hservFrame, SW_HIDE);
-				for (int i = 0; i < MY_MAX_PLAYERS; ++i)
-					ShowWindow(htabFrame[i], SW_SHOW);
+				GetServFrameMsg(hWnd);
 				break;
-			}
 			case IDB_CLIE_OK:
-				{	
-					// 获取列表框中的选中索引， -1 为没选， 选中索引从 0 开始
-					int index = ::SendMessage(hlist_serv_name, LB_GETCURSEL, NULL, NULL);
-					char buf[256] = { 0 };
-					sprintf_s(buf, "选中了 %d", index);
-					WCHAR wch[256] = { 0 };
-					USES_CONVERSION;
-					WCHAR* p = A2W(buf);
-					wcscpy_s(wch, p);
-					::MessageBox(hWnd, wch, L"消息", NULL);
-					break;
-				}
+				GetClientFrameMsg(hWnd);
+				break;
 			case IDB_CLIE_FRESH:
 				// TODO:
-				freshListBox();
+				freshListBox(hWnd);
 				break;
 			case IDB_CLIE_CANCEL:
 			case IDB_SERV_CANCEL:
@@ -448,23 +428,43 @@ void initMainFrame(HWND hWnd)
 
 void initServFrame(HWND hWnd)
 {
+	int default_id = IDF_SERVER_FRAME;
 	hservFrame = CreateWindowW(L"static", NULL, WS_CHILD | WS_BORDER /*| WS_VISIBLE*/,
 		MY_WIN_WIDTH / 2 - 210, MY_WIN_HEIGHT / 2 - 230, 400, 400,
-		hWnd, (HMENU)IDF_SERVER_FRAME, hInst, nullptr);
+		hWnd, (HMENU)default_id++, hInst, nullptr);
+	// 标题
 	HWND htitle = CreateWindowW(L"static", TEXT("创建新房间"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		100, 50, 200, 60, hservFrame, HMENU(IDF_SERVER_FRAME + 1), hInst, nullptr);
-	HWND hlab_name = CreateWindowW(L"static", TEXT("输入房间名："), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		120, 120, 160, 30, hservFrame, HMENU(IDF_SERVER_FRAME + 2), hInst, nullptr);
+		100, 50, 200, 60, hservFrame, (HMENU)default_id++, hInst, nullptr);
+	// 房间名
+	HWND hlab_name = CreateWindowW(L"static",    TEXT("     输入房间名:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		20, 110, 130, 25, hservFrame, (HMENU)default_id++, hInst, nullptr);
 	htxt_name = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER,
-		120, 150, 160, 30, hservFrame, (HMENU)IDT_SERV_NAME, hInst, NULL);
-	HWND hlab_players = CreateWindowW(L"static", TEXT("输入玩家数：1-8"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		120, 200, 160, 30, hservFrame, HMENU(IDF_SERVER_FRAME + 3), hInst, nullptr);
+		160, 110, 190, 25, hservFrame, (HMENU)IDT_SERV_NAME, hInst, NULL);
+	// 人数
+	HWND hlab_players = CreateWindowW(L"static", TEXT("输入玩家数(1-8):"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		20, 150, 130, 25, hservFrame, (HMENU)default_id++, hInst, nullptr);
 	htxt_players = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-		120, 230, 160, 30, hservFrame, (HMENU)IDT_SERV_PLAYERS, hInst, NULL);
+		160, 150, 190, 25, hservFrame, (HMENU)IDT_SERV_PLAYERS, hInst, NULL);
+	// 端口
+	HWND hlab_port = CreateWindowW(L"static",    TEXT("     服务器端口:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		20, 190, 130, 25, hservFrame, (HMENU)default_id++, hInst, nullptr);
+	htxt_port = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+		160, 190, 190, 25, hservFrame, (HMENU)IDT_SERV_PORT, hInst, NULL);
+	// 多播地址
+	HWND hlab_mc_ip = CreateWindowW(L"static",   TEXT("         多播IP:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		20, 230, 130, 25, hservFrame, (HMENU)default_id++, hInst, nullptr);
+	htxt_mc_ip = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER,
+		160, 230, 190, 25, hservFrame, (HMENU)IDT_SERV_MC_IP, hInst, NULL);
+	// 多播端口
+	HWND hlab_mc_port = CreateWindowW(L"static", TEXT("       多播端口:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		20, 270, 130, 25, hservFrame, (HMENU)default_id++, hInst, nullptr);
+	htxt_mc_port = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+		160, 270, 190, 25, hservFrame, (HMENU)IDT_SERV_MC_PORT, hInst, NULL);
+	// 按钮
 	HWND hbtn_serv_ok = CreateWindowW(L"button", L"确认", WS_CHILD | WS_VISIBLE,
-		100, 300, 50, 30, hservFrame, (HMENU)IDB_SERV_OK, hInst, nullptr);
+		100, 320, 50, 25, hservFrame, (HMENU)IDB_SERV_OK, hInst, nullptr);
 	HWND hbtn_serv_cancel = CreateWindowW(L"button", L"取消", WS_CHILD | WS_VISIBLE,
-		250, 300, 50, 30, hservFrame, (HMENU)IDB_SERV_CANCEL, hInst, nullptr);
+		250, 320, 50, 25, hservFrame, (HMENU)IDB_SERV_CANCEL, hInst, nullptr);
 	// 字体
 	static HFONT hfont = MYCREATEFRONT(28, 14, FW_BOLD);
 	::SendMessage(htitle, WM_SETFONT, (WPARAM)hfont, NULL);
@@ -474,60 +474,227 @@ void initServFrame(HWND hWnd)
 	::SendMessage(htxt_name, WM_SETFONT, (WPARAM)hfont2, NULL);
 	::SendMessage(hlab_players, WM_SETFONT, (WPARAM)hfont2, NULL);
 	::SendMessage(htxt_players, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(hlab_port, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(htxt_port, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(hlab_mc_ip, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(htxt_mc_ip, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(hlab_mc_port, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(htxt_mc_port, WM_SETFONT, (WPARAM)hfont2, NULL);
 	// 字体3 4
 	static HFONT hfont3 = MYCREATEFRONT(16, 8, FW_BOLD);
 	static HFONT hfont4 = MYCREATEFRONT(16, 8, FW_LIGHT);
 	::SendMessage(hbtn_serv_ok, WM_SETFONT, (WPARAM)hfont3, NULL);
 	::SendMessage(hbtn_serv_cancel, WM_SETFONT, (WPARAM)hfont4, NULL);
+	// TODO: 设置默认值
+	char buf[BUFSIZE] = { 0 };
+	sprintf_s(buf, "%s", DEFAULT_SERV_PORT);
+	USES_CONVERSION;
+	WCHAR* p = A2W(buf);
+	::SendMessage(htxt_port, WM_SETTEXT, NULL, (LPARAM)p);
+	sprintf_s(buf, "%s", MC_DEFAULT_ADDR);
+	p = A2W(buf);
+	::SendMessage(htxt_mc_ip, WM_SETTEXT, NULL, (LPARAM)p);
+	sprintf_s(buf, "%d", MC_DEFAULT_PORT);
+	p = A2W(buf);
+	::SendMessage(htxt_mc_port, WM_SETTEXT, NULL, (LPARAM)p);
 }
 
 void initClientFrame(HWND hWnd)
 {
+	int default_id = IDF_CLIENT_FRAME;
 	hclientFrame = CreateWindowW(L"static", NULL, WS_CHILD | WS_BORDER /*| WS_VISIBLE*/,
 		MY_WIN_WIDTH / 2 - 210, MY_WIN_HEIGHT / 2 - 230, 400, 400,
-		hWnd, (HMENU)IDF_CLIENT_FRAME, hInst, nullptr);
+		hWnd, (HMENU)default_id++, hInst, nullptr);
+	// 标题
 	HWND htitle = CreateWindowW(L"static", TEXT("加入房间"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		100, 50, 200, 60, hclientFrame, HMENU(IDF_CLIENT_FRAME + 1), hInst, nullptr);
+		100, 50, 200, 60, hclientFrame, (HMENU)default_id++, hInst, nullptr);
+
+	// 多播地址
+	HWND hlab_found_mc_ip = CreateWindowW(L"static",   TEXT("  多播IP:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		50, 110, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
+	htxt_found_mc_ip = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER,
+		140, 110, 190, 25, hclientFrame, (HMENU)IDT_CLIE_MC_IP, hInst, NULL);
+	// 多播端口
+	HWND hlab_found_mc_port = CreateWindowW(L"static", TEXT("多播端口:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		50, 140, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
+	htxt_found_mc_port = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+		140, 140, 190, 25, hclientFrame, (HMENU)IDT_CLIE_MC_PORT, hInst, NULL);
 	// 列表框
 	hlist_serv_name = CreateWindowW(L"listbox", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL,
-		80, 120, 240, 170, hclientFrame, (HMENU)IDCB_CLIE_BOX, hInst, nullptr);
-	char ch[256] = "Hello World!";
-	//::SendMessage(hlist_serv_name, LB_ADDSTRING, NULL, (LPARAM)L"选项 1");
-	//::SendMessage(hlist_serv_name, LB_ADDSTRING, NULL, (LPARAM)L"选项 2");
-	//::SendMessage(hlist_serv_name, LB_ADDSTRING, NULL, (LPARAM)L"选项 3");
-	freshListBox();
+		80, 180, 240, 120, hclientFrame, (HMENU)IDCB_CLIE_BOX, hInst, nullptr);
 
+	// 按钮
 	HWND hbtn_clie_ok = CreateWindowW(L"button", L"确认", WS_CHILD | WS_VISIBLE,
-		75, 300, 50, 30, hclientFrame, (HMENU)IDB_CLIE_OK, hInst, nullptr);
+		75, 320, 50, 30, hclientFrame, (HMENU)IDB_CLIE_OK, hInst, nullptr);
 	HWND hbtn_clie_fresh = CreateWindowW(L"button", L"刷新", WS_CHILD | WS_VISIBLE,
-		175, 300, 50, 30, hclientFrame, (HMENU)IDB_CLIE_FRESH, hInst, nullptr);
+		175, 320, 50, 30, hclientFrame, (HMENU)IDB_CLIE_FRESH, hInst, nullptr);
 	HWND hbtn_clie_cancel = CreateWindowW(L"button", L"取消", WS_CHILD | WS_VISIBLE,
-		275, 300, 50, 30, hclientFrame, (HMENU)IDB_CLIE_CANCEL, hInst, nullptr);
+		275, 320, 50, 30, hclientFrame, (HMENU)IDB_CLIE_CANCEL, hInst, nullptr);
 	// 字体
 	static HFONT hfont = MYCREATEFRONT(28, 14, FW_BOLD);
 	::SendMessage(htitle, WM_SETFONT, (WPARAM)hfont, NULL);
 	// 字体2
-	static HFONT hfont2 = MYCREATEFRONT(18, 9, FW_LIGHT);
+	static HFONT hfont2 = MYCREATEFRONT(14, 7, FW_LIGHT);
+	::SendMessage(hlab_found_mc_ip, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(htxt_found_mc_ip, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(hlab_found_mc_port, WM_SETFONT, (WPARAM)hfont2, NULL);
+	::SendMessage(htxt_found_mc_port, WM_SETFONT, (WPARAM)hfont2, NULL);
+	// 字体2
+	static HFONT hfont3 = MYCREATEFRONT(18, 9, FW_LIGHT);
 	::SendMessage(hlist_serv_name, WM_SETFONT, (WPARAM)hfont2, NULL);
 	// 字体3 4
-	static HFONT hfont3 = MYCREATEFRONT(16, 8, FW_BOLD);
-	static HFONT hfont4 = MYCREATEFRONT(16, 8, FW_LIGHT);
-	::SendMessage(hbtn_clie_ok, WM_SETFONT, (WPARAM)hfont3, NULL);
-	::SendMessage(hbtn_clie_fresh, WM_SETFONT, (WPARAM)hfont4, NULL);
-	::SendMessage(hbtn_clie_cancel, WM_SETFONT, (WPARAM)hfont4, NULL);
+	static HFONT hfont4 = MYCREATEFRONT(16, 8, FW_BOLD);
+	static HFONT hfont5 = MYCREATEFRONT(16, 8, FW_LIGHT);
+	::SendMessage(hbtn_clie_ok, WM_SETFONT, (WPARAM)hfont4, NULL);
+	::SendMessage(hbtn_clie_fresh, WM_SETFONT, (WPARAM)hfont5, NULL);
+	::SendMessage(hbtn_clie_cancel, WM_SETFONT, (WPARAM)hfont5, NULL);
+	// 设置默认值
+	char buf[BUFSIZE] = { 0 };
+	sprintf_s(buf, "%s", MC_DEFAULT_ADDR);
+	USES_CONVERSION;
+	WCHAR* p = A2W(buf);
+	::SendMessage(htxt_found_mc_ip, WM_SETTEXT, NULL, (LPARAM)p);
+	sprintf_s(buf, "%d", MC_DEFAULT_PORT);
+	p = A2W(buf);
+	::SendMessage(htxt_found_mc_port, WM_SETTEXT, NULL, (LPARAM)p);
 }
 
-void freshListBox(void)
+void freshListBox(HWND hWnd)
 {
+	char mc_ip[IP_LENGTH] = { 0 };
+	int mc_port = 0;
+	WCHAR buf[BUFSIZE] = { 0 };
+	// 获取多播IP
+	int len = ::SendMessage(htxt_found_mc_ip, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_found_mc_ip, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	if (len <= 0 || len >= IP_LENGTH) {
+		::MessageBox(hWnd, L"多播IP不符", L"超出范围", NULL);
+		return;
+	}
+	wcharToArrayChar(mc_ip, buf);
+	// TODO: 进一步检查多播 IP 是否正确
+
+	// 获取多播端口
+	len = ::SendMessage(htxt_found_mc_port, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_found_mc_port, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	mc_port = wcharToInt(buf);
+	if (mc_port < 1024 || mc_port >= 65536) {
+		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
+		return;
+	}
+	// TODO: 客户端查找服务器
+	if (cp->findServer(mc_ip, mc_port, MAX_FOUND_SERVER, MAX_FOUND_TIME, fdservs) < 0) {
+		::MessageBox(hWnd, L"FAILED", L"查找错误", NULL);
+		return;
+	}
+	if (fdservs.found == 0) {
+		::MessageBox(hWnd, L"没有找到房间", L"查找超时", NULL);
+		return;
+	}
+	// TODO: 重设列表项
 	::SendMessage(hlist_serv_name, LB_RESETCONTENT, NULL, NULL);
-	static char list[10][256] = { {0} };
-	static int n = 0;
-	n = (n + 1) % 6;
-	USES_CONVERSION;
-	for (int i = 0; i < n+5; ++i)
+	char tmp[BUFSIZE] = { 0 };
+	for (int i = 0; i < fdservs.found; ++i)
 	{
-		sprintf_s(list[i], "选项 %d", i);
-		WCHAR* p = A2W(list[i]);
+		sprintf_s(tmp, "%s %s %d", fdservs.name[i], fdservs.ip[i], fdservs.port[i]);
+		USES_CONVERSION;
+		WCHAR* p = A2W(tmp);
 		::SendMessage(hlist_serv_name, LB_ADDSTRING, NULL, (LPARAM)p);
 	}
+}
+
+void GetServFrameMsg(HWND hWnd)
+{
+	char name[BUFSIZE] = { 0 };
+	int players = 0;
+	int port = 0;
+	char mc_ip[IP_LENGTH] = { 0 };
+	int mc_port = 0;
+	WCHAR buf[256] = { 0 };
+	// TODO: 获取编辑框文本
+	// 获取房间名
+	int len = ::SendMessage(htxt_name, WM_GETTEXTLENGTH, NULL, NULL);
+	if (len <= 0) {
+		::MessageBox(hWnd, L"输入房间名", L"提示", NULL);
+		return;
+	}
+	::SendMessage(htxt_name, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	wcharToArrayChar(name, buf);
+	// 获取人数
+	len = ::SendMessage(htxt_players, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_players, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	players = wcharToInt(buf);
+	if (players <= 0 || players > MY_MAX_PLAYERS) {
+		::MessageBox(hWnd, L"人数限制：1 ~ 8", L"超出范围", NULL);
+		return;
+	}
+	// 获取端口
+	len = ::SendMessage(htxt_port, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_port, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	port = wcharToInt(buf);
+	if (port < 1024 || port >= 65536) {
+		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
+		return;
+	}
+	// 获取多播IP
+	len = ::SendMessage(htxt_mc_ip, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_mc_ip, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	if (len <= 0 || len >= IP_LENGTH) {
+		::MessageBox(hWnd, L"多播IP不符", L"超出范围", NULL);
+		return;
+	}
+	wcharToArrayChar(mc_ip, buf);
+	// TODO: 进一步检查多播 IP 是否正确
+
+	// 获取多播端口
+	len = ::SendMessage(htxt_mc_port, WM_GETTEXTLENGTH, NULL, NULL);
+	::SendMessage(htxt_mc_port, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
+	mc_port = wcharToInt(buf);
+	if (mc_port < 1024 || mc_port >= 65536) {
+		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
+		return;
+	}
+#ifdef _DEBUG		// 显示各项信息
+	char tmp[BUFSIZE] = { 0 };
+	sprintf_s(tmp, "%s %d %d %s %d", name, players, port, mc_ip, mc_port);
+	USES_CONVERSION;
+	WCHAR* k = A2W(tmp);
+	::MessageBox(hWnd, k, L"ALL PERPORTY", NULL);
+#endif
+	// TODO: 启动服务器
+
+
+
+}
+
+void GetClientFrameMsg(HWND hWnd)
+{
+	// 获取列表框中的选中索引， -1 为没选， 选中索引从 0 开始
+	int index = ::SendMessage(hlist_serv_name, LB_GETCURSEL, NULL, NULL);
+	if (index < 0) {
+		::MessageBox(hWnd, L"先选择房间", L"提示", NULL);
+		return;
+	}
+	// TODO: 启动客户端
+
+
+}
+
+void wcharToArrayChar(char* dst, const WCHAR* wch)
+{
+	USES_CONVERSION;
+	char* p = W2A(wch);
+	int len = strlen(p);
+	::memcpy(dst, p, sizeof(char) * len);
+	dst[len] = '\0';
+}
+
+int wcharToInt(const WCHAR* wch)
+{
+	int res = 0;
+	char tmp[BUFSIZE] = { 0 };
+	wcharToArrayChar(tmp, wch);
+	for (int i = 0; tmp[i] >= '0' && tmp[i] <= '9'; ++i)
+		res = res * 10 + (tmp[i] - '0');
+	return res;
 }

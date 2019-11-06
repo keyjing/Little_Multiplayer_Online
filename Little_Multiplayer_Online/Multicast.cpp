@@ -3,6 +3,25 @@
 
 using namespace std;
 
+/*			辅助函数			*/
+long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
+{
+	if (ip == NULL || ip[0] == '\0')
+		return 0;
+	int sub[4] = { 0 };
+	int k = 0;
+	for (int i = 0; i < IP_LENGTH && ip[i] != '\0'; ++i) {
+		if (ip[i] >= '0' && ip[i] <= '9')
+			sub[k] = sub[k] * 10 + ip[i] - '0';
+		else if (++k == 4)
+			break;
+	}
+	long long res = 0;
+	for (int i = 0; i < 4; ++i)
+		res = (res << 8) + sub[i];
+	return res;
+}
+
 Multicast::Multicast(const char* ip, int port): 
 	mc_port(port), running(false), running_thds(0)
 {
@@ -147,6 +166,7 @@ int Multicast::receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char 
 	int count = 0;		// 查找次数
 	struct timeval timeout = { 0,  (time_limit / maxfound) };	// 每次查找最大时间为 time_limit/maxfound
 	struct fd_set rfds;
+	long long foundip_hash[MAX_FOUND_SERVER] = { 0 };
 	while (record < maxfound && count++ < maxfound)
 	{
 		FD_ZERO(&rfds);
@@ -156,10 +176,16 @@ int Multicast::receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char 
 		int ret = ::recvfrom(sock, msg[record], BUFSIZE, 0, (SOCKADDR*)&from, &addrSize);
 		if (ret == SOCKET_ERROR)	// 连接断开
 			break;
+		::inet_ntop(AF_INET, &from.sin_addr, from_ip[record], IP_LENGTH);
+		long long ip_hash = getHashOfIP(from_ip[record]);
+		bool found = false;
+		for (int i = 0; i < record && !found; ++i)
+			if (foundip_hash[i] == ip_hash) found = true;
+		if (found)		// 已记录，丢弃
+			break;
 		// 进行记录
 		if (ret >= BUFSIZE) ret = BUFSIZE - 1;
 		msg[record][ret] = '\0';
-		::inet_ntop(AF_INET, &from.sin_addr, from_ip[record], IP_LENGTH);
 		++record;
 	}
 	::closesocket(sockM);
