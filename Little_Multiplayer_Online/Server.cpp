@@ -1,8 +1,11 @@
 #include "Server.h"
 #include<iostream>
-#include<exception>
+//#include<exception>
+#include"MyEasyLog.h"
 
 using namespace std;
+
+Server* Server::sp = nullptr;
 
 /*			辅助函数			*/
 static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
@@ -24,17 +27,6 @@ static long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
 }
 
 /*			Server 类			*/
-Server::Server(const char* _name, int _clients, ControlOption* cp): 
-	clients(_clients), ctrlOpt(cp), end(0), 
-	signal_send(false), running(false), thds_cnt(0)
-{
-	memcpy(name, _name, strlen(_name) + 1);
-	if (clients < 0) clients = 0;
-	else if (clients > MAX_CONNECT) clients = MAX_CONNECT;
-	WSADATA wsa;
-	::WSAStartup(MAKEWORD(2, 2), &wsa);
-}
-
 Server::~Server()
 {
 	stop();
@@ -44,117 +36,170 @@ Server::~Server()
 	::WSACleanup();
 }
 
-int Server::waitConnect(bool openMulticast, bool showLog)
-{	
-	//创建套接字
+void Server::setName(const char* src)
+{
+	int len = strlen(src);
+	if (len >= BUFSIZE) len = BUFSIZE - 1;
+	::memcpy(name, src, sizeof(char) * len);
+	name[len] = '\0';
+}
+
+//void Server::cpyName(char* dst, int maxlen) const
+//{
+//	int len = (maxlen < BUFSIZE) ? maxlen : BUFSIZE;
+//	::memcpy(dst, name, sizeof(char) * len);
+//	dst[len - 1] = '\0';
+//}
+
+void Server::setClients(int num)
+{
+	clients = num;
+	if (clients < 0) clients = 0;
+	else if (clients > MAX_CONNECT) clients = MAX_CONNECT;
+}
+
+//void Server::setClientsSock(int index, SOCKET sock)
+//{
+//	if (index < 0 || index > MAX_CONNECT) return;
+//	clientsSock[index] = sock;
+//}
+//
+//void Server::cpyClientsSock(SOCKET* dst, int maxlen)
+//{
+//	int len = (maxlen < MAX_CONNECT + 1) ? maxlen : MAX_CONNECT + 1;
+//	::memcpy(dst, clientsSock, sizeof(SOCKET) * len);
+//}
+//
+//SOCKET Server::getClientsSock(int index)
+//{
+//	if (index < 0 || index > MAX_CONNECT) return INVALID_SOCKET;
+//	return clientsSock[index];
+//}
+
+
+void Server::waitConnect(void)
+{
+	Server* sp = Server::getInstance();
+	// 创建套接字
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock == INVALID_SOCKET)
-		return SERV_ERROR_SOCK;
-	//设置地址和端口
+	if (sock == INVALID_SOCKET) {
+		MyEasyLog::write(LOG_ERROR, "SERVER SOCKET", "Create Socket FAILED!");
+		return;
+	}
+	// 设置地址和端口
 	sockaddr_in local;
 	memset(&local, 0, sizeof(sockaddr_in));
 	local.sin_family = AF_INET;
 	local.sin_port = htons(SERV_PORT);
 	::inet_pton(AF_INET, INADDR_ANY, &local.sin_addr);	// 接收该端口的所有消息
-	//将套接字由主动发送改为被动接收
+	// 将套接字由主动发送改为被动接收
 	if (bind(sock, (SOCKADDR*)&local, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+		MyEasyLog::write(LOG_ERROR, "SERVER BIND", "Bind Socket FAILED!");
 		closesocket(sock);
-		return SERV_ERROR_SOCK;
+		return;
 	}
-	//设置监听
+	// 设置监听
 	if (listen(sock, MAX_BACKLOG) < 0) {
+		MyEasyLog::write(LOG_ERROR, "SERVER LISTEN", "Listen Socket FAILED!");
 		closesocket(sock);
-		return SERV_ERROR_SOCK;
+		return;
 	}
 	//打开多播
 	Multicast mc(SERV_MC_ADDR, SERV_MC_PORT);
-	if (openMulticast && mc.sender(name) < 0) {
-		if(showLog) cerr << "OPEN MULTICAST FAILED!\n";
+	if (mc.sender(sp->name) < 0) {
+		MyEasyLog::write(LOG_ERROR, "SERVER MULTICAST", "Open Multicast FAILED!");
 		closesocket(sock);
-		return SERV_ERROR_NO_MC;
+		return;
 	}
 	//开始接收连接
 	SOCKET cSock;		// 临时客户端套接字
 	sockaddr_in addr;
-	int addrSize = sizeof(SOCKADDR);		
-	// 客户端 IP 转换的 hasn 值，用于查询是否已记录
-	long long clients_ip_hash[MAX_CONNECT] = { 0 };
+	int addrSize = sizeof(SOCKADDR);
+	long long clients_ip_hash[MAX_CONNECT] = { 0 };		// 客户端 IP 转换的 hasn 值，用于查询是否已记录
 	char buffer[BUFSIZE] = { 0 };
-	int record = 1;
-	while (record <= clients) {
+	while (sp->conn <= sp->clients)
+	{
 		cSock = accept(sock, (SOCKADDR*)&addr, &addrSize);
 		// 失败，放弃
-		if (cSock == INVALID_SOCKET)
+		if (cSock == INVALID_SOCKET) {
+			MyEasyLog::write(LOG_WARNING, "SERVER ACCEPT", "Once ACCEPT FAILED!");
 			continue;
-		// 获取客户端 IP 地址
-		char client_ip[IP_LENGTH] = { 0 };
-		inet_ntop(AF_INET, &addr.sin_addr, client_ip, IP_LENGTH);
-		if (showLog) cerr << "SERVER: Connect From: " << client_ip << " Index: " << record << "\n";
-		// 转化为 hash 值
-		long long iphash = getHashOfIP(client_ip);
-		bool found = false;
-		for (int i = 0; i < record && !found; ++i) {
-			if (clients_ip_hash[i] == iphash) found = true;
 		}
-		if (found) {		// 已记录					
+		// 获取客户端 IP 地址
+		inet_ntop(AF_INET, &addr.sin_addr, buffer, IP_LENGTH);
+		MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT IP", buffer);
+		MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT INDEX", (int)sp->conn);
+		// 转化为 hash 值
+		long long iphash = getHashOfIP(buffer);
+		bool found = false;
+		for (int i = 0; i < sp->conn && !found; ++i)
+			if (clients_ip_hash[i] == iphash) found = true;
+		if (found) {		// 已记录
+			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT", "FOUND In List");
 			closesocket(cSock);
 			continue;
 		}
-		buffer[0] = clients;
-		buffer[1] = record;
-		buffer[2] = '\0';
+		buffer[0] = sp->clients; buffer[1] = sp->conn;
 		// 发送失败，放弃
-		if (send(cSock, buffer, 3, 0) < 0) {
+		if (send(cSock, buffer, 2, 0) < 0) {
+			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT SEND", "FAILED");
 			closesocket(cSock);
 			continue;
 		}
 		// 进行记录
-		if (showLog) cerr << "SERVER: RECORD "<< client_ip << " SUCCESS!\n";
-		clients_ip_hash[record] = iphash;
-		clientsSock[record++] = cSock;
+		MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT", "Record SUCCESS");
+		clients_ip_hash[sp->conn] = iphash;
+		sp->clientsSock[sp->conn] = cSock;
+		++sp->conn;
 	}
 	//关闭多播
-	if(openMulticast) mc.turnOff();
-	return 0;
+	mc.turnOff();
+	MyEasyLog::write(LOG_NOTICE, "SERVER WIAT CONNECT", "FINISHED");
 }
 
-void Server::myClock_thd(Server* sp)
+void Server::myClock_thd(void)
 {
+	Server* sp = Server::getInstance();
 	while (sp->running)
 	{
 		this_thread::sleep_for(chrono::milliseconds(20));		// 每 20 ms产生一次时钟信号
 		unique_lock<mutex> locker_sign(sp->mt_signal);
-		sp->signal_send = true;
+		sp->clock_signal = true;
 		locker_sign.unlock();
 		sp->cond_signal.notify_one();
 	}
+	MyEasyLog::write(LOG_NOTICE, "SERVER CLOCK THREAD", "FINISHED");
 	sp->thd_finished();
 }
 
-void Server::recv_thd(Server* sp, bool showLog)
+void Server::recv_thd(void)
 {
+	Server* sp = Server::getInstance();
 	struct fd_set rfds;
 	// 键盘负载次数不超过 40 ，每 25 ms需要轮询一遍，即在最大连接 10 的情况下，每个连接只能等待 2.5 ms
 	struct timeval timeout = { 0,2 };
 	char buffer[BUFSIZE] = { 0 };
-	int ret = -1;
-	SOCKET socks[MAX_CONNECT] = { INVALID_SOCKET };
-	int conn = sp->clients;
-	while (sp->running && conn > 0)
+	int ret = 0;
+	SOCKET socks[MAX_CONNECT + 1] = { INVALID_SOCKET };
+	int keep = sp->clients;			// 保持连接数
+	while (sp->running && keep > 0)
 	{
-		conn = sp->clients;			// 每次检测是否全部断开
+		keep = sp->clients;			// 每次检测是否全部断开
+
 		unique_lock<mutex> locker_sock(sp->mt_sock);		// 获取副本
 		::memcpy(socks, sp->clientsSock, sizeof(sp->clientsSock));
 		locker_sock.unlock();
 		sp->cond_sock.notify_one();
-		for (int i = 1; i <= sp->clients; ++i)			// 通过 select I/O复用函数依次访问每个客户端SOCKET
+
+		for (int i = 1; i <= sp->clients; ++i)				// 通过 select I/O复用函数依次访问每个客户端SOCKET
 		{
-			if (socks[i] == INVALID_SOCKET) { --conn; continue;	}
+			if (socks[i] == INVALID_SOCKET) { --keep; continue;	}
 			FD_ZERO(&rfds);
 			FD_SET(socks[i], &rfds);
 			switch(::select(0, &rfds, NULL, NULL, &timeout))
 			{
 			case -1:				// 连接已断开
+				MyEasyLog::write(LOG_NOTICE, "SERVER DISCONNECT WITH INDEX", i);
 				::closesocket(socks[i]);
 				socks[i] = INVALID_SOCKET;
 				break;
@@ -163,29 +208,29 @@ void Server::recv_thd(Server* sp, bool showLog)
 				ret = ::recv(socks[i], buffer, BUFSIZE, 0);
 				if (ret < 0)
 				{
-					cerr << "SERVER: ERROR Receive Form Index " << i << "\n";
+					MyEasyLog::write(LOG_ERROR, "SERVER RECEIVE FAILED FROM INDEX", i);
 					::closesocket(socks[i]);
 					socks[i] = INVALID_SOCKET;
 					continue;
 				}
 				if (ret == 0) continue;
-				// TODO: 缓冲区不足
-				unique_lock<mutex> locker_buf(sp->mt_buf);
+				// 写入 MESSAGE BUFFER 中 sp->msg
+				unique_lock<mutex> locker_msg(sp->mt_msg);
 				// TODO
 				if (ret > BUFSIZE - 4) continue;
-				while (sp->end + ret + 2 > BUFSIZE) {			// TODO：ret 大于 BUFSIZE - 2 - 2 时会发生死循环
+				while (sp->msg_endpos + ret + 2 > BUFSIZE) {			// TODO：ret 大于 BUFSIZE - 2 - 2 时会发生死循环
 					unique_lock<mutex> locker_sign(sp->mt_signal);		// 立即发出一个时钟发送信号
-					sp->signal_send = true;
+					sp->clock_signal = true;
 					locker_sign.unlock();
 					sp->cond_signal.notify_one();			// 唤醒等待发送信号的发送线程清空缓冲区
-					sp->cond_buf.wait(locker_buf);			// 等待缓冲区清空
+					sp->cond_msg.wait(locker_msg);			// 等待缓冲区清空
 				}
-				sp->buf[sp->end++] = i;			// 客户端 ID
-				::memcpy(sp->buf + sp->end, buffer, sizeof(char) * ret);
-				sp->end += ret;
-				sp->buf[sp->end++] = MY_MSG_BOARD;	// 消息的边界符号
-				locker_buf.unlock();
-				sp->cond_buf.notify_one();
+				sp->msg[sp->msg_endpos++] = i;				// 客户端 ID
+				::memcpy(sp->msg + sp->msg_endpos, buffer, sizeof(char) * ret);
+				sp->msg_endpos += ret;
+				sp->msg[sp->msg_endpos++] = MY_MSG_BOARD;	// 消息的边界符号
+				locker_msg.unlock();
+				sp->cond_msg.notify_one();
 			}
 		}
 		FD_ZERO(&rfds);
@@ -194,17 +239,18 @@ void Server::recv_thd(Server* sp, bool showLog)
 		locker2_sock.unlock();
 		sp->cond_sock.notify_one();
 	}
-	sp->thd_finished();
-	if (conn <= 0) {			// 客户端全部断开时终止 Server 服务
-		//sp->stop();
+	if (keep <= 0) {			// 客户端全部断开时终止 Server 服务
 		sp->running = false;
-		cerr << "SERVER: All Clients Disconnected.\n";
+		MyEasyLog::write(LOG_NOTICE, "SERVER", "All Clients Disconnected.");
 	}
+	MyEasyLog::write(LOG_NOTICE, "SERVER RECEIVE THREAD", "FINISHED");
+	sp->thd_finished();
 }
 
-void Server::send_thd(Server* sp, bool showLog)
+void Server::send_thd(void)
 {
-	SOCKET socks[MAX_CONNECT] = { INVALID_SOCKET };
+	Server* sp = Server::getInstance();
+	SOCKET socks[MAX_CONNECT + 1] = { INVALID_SOCKET };
 	char buffer[BUFSIZE + 1] = { 0 };
 	int end_bk = 0;
 	while (sp->running) {
@@ -213,88 +259,98 @@ void Server::send_thd(Server* sp, bool showLog)
 		locker_sock.unlock();
 		sp->cond_sock.notify_one();
 		
-		unique_lock<mutex> locker_buf(sp->mt_buf);		// 获取缓冲区副本 并 清空缓冲
-		::memcpy(buffer, sp->buf, sizeof(sp->buf));
-		::memset(sp->buf, 0, sizeof(sp->buf));
-		end_bk = sp->end;
+		unique_lock<mutex> locker_msg(sp->mt_msg);		// 获取缓冲区副本 并 清空缓冲
+		::memcpy(buffer, sp->msg, sizeof(sp->msg));
+		end_bk = sp->msg_endpos;
 		// 清空缓冲区
-		sp->end = 0;
+		::memset(sp->msg, 0, sizeof(sp->msg));
+		sp->msg_endpos = 0;
 		if (sp->ctrlOpt)
 		{
-			sp->buf[sp->end++] = 0;			// Server ID
-			int len = sp->ctrlOpt->createOpt(sp->buf + sp->end, BUFSIZE - 2);		// 内容
+			sp->msg[sp->msg_endpos++] = 0;			// Server ID
+			int len = sp->ctrlOpt->createOpt(sp->msg + sp->msg_endpos, BUFSIZE - 2);		// 内容
 			if (len < 0) len = 0;
-			sp->end += len;
-			sp->buf[sp->end++] = MY_MSG_BOARD;		// 边界
+			sp->msg_endpos += len;
+			sp->msg[sp->msg_endpos++] = MY_MSG_BOARD;		// 边界
 		}
-		sp->cond_buf.notify_one();
+		locker_msg.unlock();
+		sp->cond_msg.notify_one();
 		if (end_bk == 0) continue;
 		buffer[end_bk] = '\0';
-		if (showLog) {
-			for (int i = 0; i < end_bk; ++i)
-			{
-				cerr << "SERVER: INDEX " << int(buffer[i++]) << "; ";
-				while (i < end_bk && buffer[i] != MY_MSG_BOARD)
-					cerr << buffer[i++];
-				cerr << endl;
-			}
+#ifdef _DEBUG	// 只在 DEBUG 模式下将发送信息写入日志
+		ostringstream ostr;
+		ostr << endl;
+		for (int i = 0; i < end_bk; ++i)
+		{
+			ostr << "INDEX " << int(buffer[i++]) << ": ";
+			while (i < end_bk && buffer[i] != MY_MSG_BOARD)
+				ostr << buffer[i++];
+			ostr << endl;
 		}
+		MyEasyLog::write(LOG_NOTICE, "SERVER SEND MESSAGE", ostr.str());
+#endif
 		for (int i = 1; i <= sp->clients; ++i)		// 利用缓冲区副本进行发送
 		{
 			if (socks[i] == INVALID_SOCKET) continue;
 			if (::send(socks[i], buffer, sizeof(char) * end_bk, 0) < 0)
 			{
-				if(showLog) cerr << "SERVER: SEND THREAD: ERROR Send To Index " << i << endl;
+				MyEasyLog::write(LOG_ERROR, "SERVER SEND FAILED TO INDEX", i);
 				::closesocket(socks[i]);
 				socks[i] = INVALID_SOCKET;
 			}
 		}
-		//if (showLog) cerr << "SERVER: SEND THREAD: ONCE SEND ALL OVER. LENGTH " << end_bk << endl;
 		unique_lock<mutex> locker2_sock(sp->mt_sock);	//保存套接字副本
 		::memcpy(sp->clientsSock, socks, sizeof(sp->clientsSock));
 		locker2_sock.unlock();
 		sp->cond_sock.notify_one();
 	}
+	MyEasyLog::write(LOG_NOTICE, "SERVER SEND THREAD", "FINISHED");
 	sp->thd_finished();
 }
 
 void Server::thd_finished()	
 {
 	unique_lock<mutex> locker_thds(mt_thds);
-	thds_cnt--;
+	running_thd--;
 	locker_thds.unlock();
 	cond_thds.notify_one();
 }
 
-int Server::start(bool showLog)
+int Server::start(void)
 {
+	thread conn_thd(waitConnect);
+	conn_thd.join();
+
 	unsigned int bits = 0;				// 按位保存每一个客户端是否准备就绪状态
 	for (int i = 0; i < clients; ++i)
 		bits = (bits << 1) | 1;
 	
 	struct fd_set rfds;
 	struct timeval timeout = { 0,20 };
-	int cnt = clients;
+	int keep = clients;
 	char buffer[BUFSIZE] = { 0 };
 	int ret = 0;
-	while (bits != 0 && cnt != 0) {		// 等待所有客户端就绪
-		cnt = clients;
+	while (bits != 0 && keep > 0) {		// 等待所有客户端就绪
+		keep = clients;
 		for (int i = 1; i <= clients; ++i) {
 			if (clientsSock[i] == INVALID_SOCKET) continue;
 			FD_ZERO(&rfds);
 			FD_SET(clientsSock[i], &rfds);
-			switch (::select(0, &rfds, NULL, NULL, &timeout)) {
-			case -1: --cnt; break;		// 连接断开
+			switch (::select(0, &rfds, NULL, NULL, &timeout))
+			{
+			case -1: --keep; 
+				MyEasyLog::write(LOG_WARNING, "SERVER START DISCONNECT", i);
+				break;		// 连接断开
 			case 0:	break;				// 等待超时
 			default:
 				ret = ::recv(clientsSock[i], buffer, BUFSIZE, 0);
 				if (ret < 0) {
-					if (showLog) cerr << "SERVER: START: ERROR RECEIVE INDEX " << i << endl;
+					MyEasyLog::write(LOG_ERROR, "SERVER START RECEIVE FAILED FORM INDEX", i);
 					continue;
 				}
 				if (buffer[0] == MY_MSG_OK) {
 					bits ^= (1 << (i - 1));		// 异或运算，去除该位
-					if (showLog) cerr << "SERVER: START: OK INDEX " << i << " bits = " << bits << endl;
+					MyEasyLog::write(LOG_NOTICE, "SERVER START RECEIVE OK FROM INDEX", i);
 				}
 			}
 		}
@@ -307,24 +363,25 @@ int Server::start(bool showLog)
 		len += ctrlOpt->createOpt(buffer + len, BUFSIZE - 1);
 		buffer[len++] = MY_MSG_BOARD;
 	}
-	for (int i = 1; i <= clients; ++i) {		// 通知所有客户端都已经就绪
+	for (int i = 1; i <= clients; ++i) {		// 通知所有客户端都已经就绪jf
 		if (clientsSock[i] == INVALID_SOCKET) continue;
 		if (::send(clientsSock[i], buffer, sizeof(char) * len, 0) <= 0) {
-			if (showLog) cerr << "SERVER: SNED OK FAILED INDEX " << i << endl;
+			MyEasyLog::write(LOG_ERROR, "SERVER START", "Send All Clients OK FAILED.");
 			return SERV_ERROR_SOCK;
 		}
 	}
 	if (bits != 0) return SERV_ERROR_SOCK;
+	MyEasyLog::write(LOG_NOTICE, "SERVER START", "Initialized FINISHED");
 
 	// 线程相关变量初始化
 	running = true;
-	thds_cnt = 3;
-	end = 0;
-	signal_send = false;
+	running_thd = 3;
+	msg_endpos = 0;
+	clock_signal = false;
 
-	thread clk(myClock_thd, this);
-	thread recv(recv_thd, this, showLog);
-	thread send(send_thd, this, showLog);
+	thread clk(myClock_thd);
+	thread recv(recv_thd);
+	thread send(send_thd);
 	clk.detach();
 	recv.detach();
 	send.detach();
@@ -334,9 +391,10 @@ int Server::start(bool showLog)
 void Server::stop()
 {
 	unique_lock<mutex> locker_thds(mt_thds);
-	while (thds_cnt > 0) {
+	while (running_thd > 0) {
 		running = false;
 		cond_thds.wait(locker_thds);
 	}
 	locker_thds.unlock();
+	MyEasyLog::write(LOG_NOTICE, "SERVER THREAD", "All Thread Stop.");
 }

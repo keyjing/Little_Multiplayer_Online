@@ -4,60 +4,73 @@
 #include"Multicast.h"
 #include"Server.h"
 
+#define MAX_FOUND_SOCK	20
+#define NO_FOUND_SERV	-1
+
 #define CLIENT_SUCCESS	0
 #define CLIENT_ERROR	-1
 
+// 单例模式
 class Client
 {
-	int clients = 0;
-	int index = 0;
-
-	SOCKET servSock = INVALID_SOCKET;
-
-	char buf[BUFSIZE] = { 0 };
-	int end = 0;
-	std::mutex mt_buf;
-	std::condition_variable cond_buf;
-
-	char recv_buf[BUFSIZE] = { 0 };
-	std::mutex mt_recv_buf;
-	std::condition_variable cond_recv_buf;
-
-	bool signal_send = false;
-	std::mutex mt_signal;
-	std::condition_variable cond_signal;
-
-	volatile bool running = false;
-	int thds_cnt = 0;
-	std::mutex mt_thds;
-	std::condition_variable cond_thds;
-
-	//static void myClock_thd(Client* cp);
-	static void send_thd(Client* cp);
-	static void recv_thd(Client* cp, bool showLog = false);
-	void thd_finished();
-
 public:
-	Client(): end(0), signal_send(false), running(false), thds_cnt(0) { 
+	~Client();
+
+	static Client* getInstance() {
+		if (cp == nullptr) cp = new Client();
+		return cp;
+	}
+
+	int findServer();
+
+	int connServByIndex(int index);
+	int connServByIP(const char* server_ip);
+
+	int addOpts(const char* opts, int len);
+
+	int start(void);
+	void stop(void);
+
+private:
+	Client() : clients(0), index(0), servSock(INVALID_SOCKET), msg_endpos(0), 
+		clock_signal(false), running(false), running_thds(0)
+	{
 		WSADATA wsa;
 		::WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
-	~Client() {	
-		stop();
-		if (servSock != INVALID_SOCKET) ::closesocket(servSock);
-		::WSACleanup();
-	}
 
-	/*	连接服务器
-	*	@ server_ip	: 要连接的服务器 IP， 当为 NULL 时通过多播查找局域网进行连接，否则直接连接
-	*	@ showLog	: 是否打印连接过程中的 LOG，默认不打印
-	*/
-	int connectServer(const char* server_ip, bool showLog = false);	
+	static Client* cp;
+	
+	int clients;
+	int index;
 
-	int addOpts(const char* opts, int len, bool showLog = false);
+	SOCKET servSock;
 
-	int start(bool showLog = false);
-	void stop();
+	char foundServName[MAX_FOUND_SOCK][BUFSIZE] = { {0} };
+	SOCKET foundServSock[MAX_FOUND_SOCK] = { INVALID_SOCKET };
+
+	char send_msg[BUFSIZE] = { 0 };
+	int msg_endpos;
+	std::mutex mt_send_msg;
+	std::condition_variable cond_send_msg;
+
+	char recv_msg[BUFSIZE] = { 0 };
+	std::mutex mt_recv_msg;
+	std::condition_variable cond_recv_msg;
+
+	bool clock_signal;
+	std::mutex mt_signal;
+	std::condition_variable cond_signal;
+
+	volatile bool running;
+	int running_thds;
+	std::mutex mt_thds;
+	std::condition_variable cond_thds;
+
+	static void send_thd(void);
+	static void recv_thd(void);
+	void thd_finished();
+
 };
 
 

@@ -12,7 +12,8 @@
 
 using namespace std;
 
-volatile bool running = true;
+volatile bool client_running = true;
+volatile bool serv_running = false;
 
 int main()
 {
@@ -24,85 +25,43 @@ int main()
 	if (ch == 's') {
 		thread thds([=]()
 			{
-				Server server("CS TEST", 1, nullptr);
-				server.waitConnect(true, true);
-				server.start(true);
-				while (running) Sleep(20);
-				server.stop();
-				cout << "SERVER: STOP." << endl;
+				serv_running = true;
+				Server* sp = Server::getInstance();
+				sp->setName("CS TEST");
+				sp->setClients(1);
+				sp->start();
+				while (client_running) Sleep(20);
+				//this_thread::sleep_for(chrono::seconds(2));
+				cout << "SERVER: TO STOP" << endl;
+				sp->stop();
+				cout << "SERVER: STOP FINISHED" << endl;
+				serv_running = false;
 			});
 		thds.detach();
 
-		Client localClient;
-		localClient.connectServer("127.0.0.1", true);
-		cout << endl << endl;
-		localClient.start(false);
-		while ((ch = _getch()) != 'q') localClient.addOpts(&ch, 1);
+		Client* cp = Client::getInstance();
+		cp->connServByIP("127.0.0.1");
+		cp->start();
+		cout << "Press keyboard to send and see detail in log." << endl;
+		cout << "Pree 'q' to end." << endl;
+		while ((ch = _getch()) != 'q') cp->addOpts(&ch, 1);
 		cout << endl;
-		running = false;
-		Sleep(100);
-		localClient.stop();
+		client_running = false;
 
-		//thread thdc([=]() {
-		//	Sleep(100);
-		//	Client localClient;
-		//	/*char ip[IP_LENGTH] = { 0 };
-		//	getLocalIP(ip);*/
-		//	localClient.connectServer("127.0.0.1", true);		// 也可以用 "127.0.0.1"
+		cout << "CLIENT: TO STOP" << endl;
+		cp->stop();
+		cout << "CLIENT: STOP FINISHED" << endl;
 
-		//	int trycnt = 100;
-		//	while (localClient.start(true) == CLIENT_ERROR)
-		//		if (--trycnt == 0) {
-		//			cout << "CLIENT: WAIT ALL CLIENT OK TIME OUT.\n";
-		//			return 1;
-		//		}
-
-		//	char ch[10] = "ABCDEFG";
-		//	int cnt = 10;
-		//	while (cnt-- > 0)
-		//	{
-		//		localClient.addOpts(ch, 10);
-		//		Sleep(100);
-		//	}
-		//	localClient.stop();
-		//	cout << endl << "LOCAL CLIENT: OVER!" << endl;
-		//});
-		//thdc.detach();
-
-		//Server server("CS_TEST", 1, nullptr);
-		//cout << "SERVER: Waiting Connect: " << endl;
-		//server.waitConnect(true, true);			// OPEN MULTICAST AND SHOW LOG
-
-		//if (server.start() == SERV_ERROR_SOCK) {
-		//	cout << "SERVER: ERROR START.\n";
-		//	return 1;
-		//}
-
-		//cout << "SERVER: Provide server until press 'q'!" << endl;
-		//while ((ch = _getch()) != 'q');
-		//server.stop();
-		//cout << "SERVER: OVER!" << endl;
+		while (serv_running) Sleep(20);
 	}
 	else {
-		Client client;
-		cout << "Connecting to Server: " << endl;
-		client.connectServer(NULL, true);	//不指定服务器 IP，局域网查找
-		cout << endl << endl;
-		cout << "CLIENT: Send until press 'q'." << endl;
-
-		int trycnt = 100;
-		while (client.start(true) == CLIENT_ERROR)
-			if (--trycnt == 0) {
-				cout << "CLIENT: WAIT ALL CLIENT OK TIME OUT.\n";
-				return 1;
-			}
-
-		while ((ch = _getch()) != 'q')
-		{
-			client.addOpts(&ch, 1, true);
-		}
-		client.stop();
-		cout << endl << "CLIENT: OVER!" << endl;
+		Client* cp = Client::getInstance();
+		cp->findServer();
+		cp->start();
+		cout << "Press keyboard to send and see detail in log." << endl;
+		cout << "Pree 'q' to end." << endl;
+		while ((ch = _getch()) != 'q') cp->addOpts(&ch, 1);
+		cp->stop();
 	}
 
 	system("pause");
