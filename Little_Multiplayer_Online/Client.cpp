@@ -12,6 +12,7 @@ static volatile int cnt = 0;
 Client::~Client()
 {
 	stop();
+	if (postman) delete postman;
 	if (servSock != INVALID_SOCKET) ::closesocket(servSock);
 	::WSACleanup();
 }
@@ -160,7 +161,6 @@ int Client::addOpts(const char* opts, int len)
 	return CLIENT_SUCCESS;
 }
 
-
 void Client::send_thd(void)
 {
 	Client* cp = Client::getInstance();
@@ -221,28 +221,40 @@ void Client::recv_thd(void)
 			cp->running = false;
 			break;
 		}
-		buffer[ret] = '\0';
-#ifdef _DEBUG
-		ostringstream ostr;
-		ostr << endl;
-		for (int i = 0; i < ret; ++i)
-		{
-			int index = buffer[i++];
-			char msg[BUFSIZE] = { 0 };
-			int end = 0;
-			while (i < ret && buffer[i] != MY_MSG_BOARD)
-				msg[end++] = buffer[i++];
-			msg[end] = '\0';
-			ostr << "CLIENT " << index << ": " << msg << endl;
-			if (index == cp->index) cout << msg;
+		if (cp->postman == nullptr) {
+			MyEasyLog::write(LOG_WARNING, "CLIENT RECEIVE THREAD", "No Post Man.");
+			continue;
 		}
-		MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE", ostr.str());
-#endif // DEBUG
-		// 写入接收缓冲区
-		unique_lock<mutex> locker_recv(cp->mt_recv_msg);
-		::memcpy(cp->recv_msg, buffer, sizeof(cp->recv_msg));
-		locker_recv.unlock();
-		cp->cond_recv_msg.notify_one();
+		int pos = 0;
+		while (pos < ret)
+		{
+			int id = buffer[pos];
+			int begin = ++pos;
+			while (pos < ret && buffer[pos] != MY_MSG_BOARD) pos++;
+			cp->postman->delivery(id, buffer + begin, pos - begin);
+		}
+//		buffer[ret] = '\0';
+//#ifdef _DEBUG
+//		ostringstream ostr;
+//		ostr << endl;
+//		for (int i = 0; i < ret; ++i)
+//		{
+//			int index = buffer[i++];
+//			char msg[BUFSIZE] = { 0 };
+//			int end = 0;
+//			while (i < ret && buffer[i] != MY_MSG_BOARD)
+//				msg[end++] = buffer[i++];
+//			msg[end] = '\0';
+//			ostr << "CLIENT " << index << ": " << msg << endl;
+//			if (index == cp->index) cout << msg;
+//		}
+//		MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE", ostr.str());
+//#endif // DEBUG
+//		 写入接收缓冲区
+//		unique_lock<mutex> locker_recv(cp->mt_recv_msg);
+//		::memcpy(cp->recv_msg, buffer, sizeof(cp->recv_msg));
+//		locker_recv.unlock();
+//		cp->cond_recv_msg.notify_one();
 	}
 	MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE THREAD", "FINISHED");
 	cp->thd_finished();

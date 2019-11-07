@@ -10,6 +10,13 @@
 #define CLIENT_SUCCESS		0
 #define CLIENT_ERROR		-1
 
+class PostMan
+{
+public:
+	virtual void delivery(int id, const char* msg, int len) = 0;
+};
+
+
 // 找到的服务器列表结构体
 struct FoundServerResult {
 	char name[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
@@ -17,7 +24,6 @@ struct FoundServerResult {
 	int port[MAX_FOUND_SERVER] = { 0 };
 	int found = 0;
 };
-
 
 // 单例模式
 class Client
@@ -29,6 +35,11 @@ public:
 		if (cp == nullptr) cp = new Client();
 		return cp;
 	}
+
+	void setPostMan(PostMan* p) { if (postman) delete postman; postman = p; }
+
+	int getIndex() const { return index; }
+	int getClients() const { return clients; }
 
 	// 通过多播查找服务器
 	// @ parameter
@@ -46,8 +57,8 @@ public:
 	void stop(void);		// 关闭所有执行线程
 
 private:
-	Client() : clients(0), index(0), servSock(INVALID_SOCKET), msg_endpos(0), 
-		clock_signal(false), running(false), running_thds(0)
+	Client() : clients(0), index(0), servSock(INVALID_SOCKET), msg_endpos(0),
+		clock_signal(false), running(false), running_thds(0), postman(nullptr)
 	{
 		WSADATA wsa;
 		::WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -62,6 +73,8 @@ private:
 
 	static Client* cp;				// 单例句柄
 
+	PostMan* postman;				// 负责将接收的消息进行配发处理
+
 	int clients;					// 服务端的所有客户端数
 	int index;						// 在服务端中的 Index
 
@@ -72,9 +85,9 @@ private:
 	std::mutex mt_send_msg;
 	std::condition_variable cond_send_msg;
 
-	char recv_msg[BUFSIZE] = { 0 };		// 接收数据缓冲区
-	std::mutex mt_recv_msg;
-	std::condition_variable cond_recv_msg;
+	//char recv_msg[BUFSIZE] = { 0 };		// 接收数据缓冲区
+	//std::mutex mt_recv_msg;
+	//std::condition_variable cond_recv_msg;
 
 	bool clock_signal;					// 时钟信号
 	std::mutex mt_signal;

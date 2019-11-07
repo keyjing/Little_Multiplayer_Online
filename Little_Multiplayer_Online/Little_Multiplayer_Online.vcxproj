@@ -132,6 +132,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Client.h" />
+    <ClInclude Include="Game_2048.h" />
     <ClInclude Include="Multicast.h" />
     <ClInclude Include="MyEasyLog.h" />
     <ClInclude Include="Server.h" />

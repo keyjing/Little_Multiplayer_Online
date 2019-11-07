@@ -12,6 +12,18 @@
 
 using namespace std;
 
+class ConsolePostMan : public PostMan
+{
+	// Í¨¹ý PostMan ¼Ì³Ð
+	virtual void delivery(int id, const char* msg, int len) override
+	{
+		Client* cp = Client::getInstance();
+		if (id != cp->getIndex()) return;
+		for (int i = 0; i < len; ++i)
+			cout << msg[i];
+	}
+};
+
 volatile bool client_running = true;
 volatile bool serv_running = false;
 
@@ -38,6 +50,7 @@ int main()
 		thds.detach();
 
 		Client* cp = Client::getInstance();
+		cp->setPostMan(new ConsolePostMan());
 		cp->start("127.0.0.1", 1234);
 		cout << "Press keyboard to send and see detail in log." << endl;
 		cout << "Pree 'q' to end." << endl;
@@ -53,24 +66,21 @@ int main()
 	}
 	else {
 		Client* cp = Client::getInstance();
-		
-		char name[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
-		char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
-		int port[MAX_FOUND_SERVER] = { 0 };
+		cp->setPostMan(new ConsolePostMan());
+		FoundServerResult fdservs;
 
-		int found = cp->findServer(MC_DEFAULT_ADDR, MC_DEFAULT_PORT, MAX_FOUND_SERVER,
-			1000, name, ip, port);
+		int found = cp->findServer(MC_DEFAULT_ADDR, MC_DEFAULT_PORT, MAX_FOUND_SERVER, 1000, fdservs);
 
 		cout << "found = " << found << endl;
 		if (found <= 0)
 			return 1;
 		for (int i = 0; i < found; ++i)
-			cout << i << ". " << name[i] << " " << ip[i] << " " << port[i] << endl;
+			cout << i << ". " << fdservs.name[i] << " " << fdservs.ip[i] << " " << fdservs.port[i] << endl;
 		cout << "Select index: ";
 		int index = -1;
 		while (index < 0 || index >= found) cin >> index;
 
-		cp->start(ip[index], port[index]);
+		cp->start(fdservs.ip[index], fdservs.port[index]);
 
 		cout << "Press keyboard to send and see detail in log." << endl;
 		cout << "Pree 'q' to end." << endl;
