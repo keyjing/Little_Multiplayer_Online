@@ -152,12 +152,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
+    <ClInclude Include="GameTable_2048.h" />
     <ClInclude Include="GUI_win32.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
+    <ClInclude Include="WinGameControl.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="GameTable_2048.cpp" />
     <ClCompile Include="GUI_win32.cpp" />
+    <ClCompile Include="WinGameControl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="GUI_win32.rc" />

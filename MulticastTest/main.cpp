@@ -23,9 +23,11 @@ int main()
 	}
 	else {
 		cout << "Receving: ";
-		char buffer[BUFSIZE] = { 0 };
-		char ip[IP_LENGTH] = { 0 };
-		if (mc.receiver(buffer, ip) == MC_NO_RECEVICE)
+		char buffer[10][MC_MSG_LENGTH] = { 0 };
+		char ip[10][IP_LENGTH] = { 0 };
+		int maxfound = 10;
+		int timelimit = 3000;
+		if (mc.receiver(maxfound, timelimit, buffer, ip) == MC_NO_RECEVICE)
 			cout << "NOTHING RECEIVED!" << endl;
 		else
 			cout << buffer << endl << ip << endl;
