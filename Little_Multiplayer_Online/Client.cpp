@@ -270,6 +270,7 @@ void Client::recv_thd(void)
 			client_recv_cnt += pos - begin;		// 统计接收字节数
 #endif // _DEBUG
 			cp->postman->delivery(id, buffer + begin, pos - begin);
+			++pos;	// 去掉 MY_MSG_BOARD
 		}
 	}
 	MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE THREAD", "FINISHED");

@@ -244,7 +244,7 @@ void Server::send_thd(void)
 	SOCKET socks[MAX_CONNECT + 1] = { INVALID_SOCKET };
 	char buffer[BUFSIZE + 1] = { 0 };
 	int end_bk = 0;
-	static int lastOptLength = 0;		//保存上一次服务器指令长度
+	int lastOptLength = 0;		//保存上一次服务器指令长度
 	while (sp->running) {
 		unique_lock<mutex> locker_signal(sp->mt_signal);	// 等待发送信号
 		while (!sp->clock_signal) sp->cond_signal.wait(locker_signal);
@@ -258,8 +258,12 @@ void Server::send_thd(void)
 		sp->cond_sock.notify_one();
 		
 		unique_lock<mutex> locker_msg(sp->mt_msg);		// 获取缓冲区副本 并 清空缓冲
-		while (sp->msg_endpos <= lastOptLength)		// 没有收到消息
-			sp->cond_msg.wait(locker_msg);
+		if (sp->msg_endpos <= lastOptLength) {	// 没有收到消息
+			locker_msg.unlock();
+			sp->cond_msg.notify_one();
+			this_thread::sleep_for(chrono::milliseconds(20));
+			continue;
+		}
 		::memcpy(buffer, sp->msg, sizeof(sp->msg));
 		end_bk = sp->msg_endpos;
 		// 清空缓冲区
@@ -267,10 +271,10 @@ void Server::send_thd(void)
 		if (sp->ctrlOpt)
 		{
 			sp->msg[sp->msg_endpos++] = 0;			// Server ID
-			lastOptLength = sp->ctrlOpt->createOpt(sp->msg + sp->msg_endpos, BUFSIZE - 2);		// 内容
-			sp->msg_endpos += lastOptLength;
+			sp->msg_endpos += sp->ctrlOpt->createOpt(sp->msg + sp->msg_endpos, BUFSIZE - 2);		// 内容
 			sp->msg[sp->msg_endpos++] = MY_MSG_BOARD;		// 边界
 		}
+		lastOptLength = sp->msg_endpos;		// 保存上一次长度
 		locker_msg.unlock();
 		sp->cond_msg.notify_one();
 

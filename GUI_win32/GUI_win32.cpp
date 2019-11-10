@@ -67,13 +67,6 @@ HANDLE hwaiting_thd = NULL;			// 等待连接时控制输出信息线程
 DWORD hwaiting_thd_id;				// 线程ID
 volatile int waiting_property = 0;	// 等待状态
 
-HANDLE hsender_thd = NULL;
-DWORD  hsender_thd_id;
-volatile char sender_buf[BUFSIZE] = { 0 };
-volatile int startpos = 0;
-volatile int endpos = 0;
-//HANDLE hsender_mutex;
-
 // TODO: 全局控件
 HWND hmainFrame;		// 主界面
 
@@ -107,12 +100,10 @@ void	startFromServFrame(HWND);			// 获取服务端界面的信息，并进行�
 void	startFromClientFrame(HWND);			// 获取客户端界面的信息，并进行处理
 void	wcharToArrayChar(char*, const WCHAR*);
 int		wcharToInt(const WCHAR*);
-bool	MyGetLocalIP(char*);
 
 DWORD WINAPI MyServThreadPro(LPVOID);		// 服务器启动线程入口函数
 DWORD WINAPI MyClientThreadPro(LPVOID);		// 客户端启动线程入口函数
 DWORD WINAPI MyWaitingThreadPro(LPVOID);		// 客户端启动线程入口函数
-DWORD WINAPI MySenderThreadPro(LPVOID);
 
 // 原始的静态文本消息响应及自定义的消息响应
 WNDPROC	OriginStaticProc;									// 静态区域控件原本的响应函数	
@@ -158,36 +149,36 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     while (GetMessage(&msg, nullptr, 0, 0))
     {
 		// 消息截取
-		//if (msg.message == WM_KEYDOWN && waiting_property == CLIENT_ALL_START)
-		//{
-		//	switch (msg.wParam)
-		//	{
-		//		case VK_UP:
-		//		{
-		//			Sleep(100);
-		//			//char buf[] = { GAME_OPT_UP };
-		//			//Client::getInstance()->addOpts(buf, 1);
-		//			break;
-		//		}
-		//		case VK_DOWN:
-		//		{
-		//			//char buf[] = { GAME_OPT_DOWN };
-		//			//Client::getInstance()->addOpts(buf, 1);
-		//			break;
-		//		}
-		//		case VK_LEFT:
-		//		{
-		//			//char buf[] = { GAME_OPT_LEFT };
-		//			//Client::getInstance()->addOpts(buf, 1);
-		//			break;
-		//		}
-		//		case VK_RIGHT:
-		//		{
-		//			//char buf[] = { GAME_OPT_RIGHT };
-		//			//Client::getInstance()->addOpts(buf, 1);
-		//		}
-		//	}
-		//}
+		if (msg.message == WM_KEYDOWN && waiting_property == CLIENT_ALL_START)
+		{
+			switch (msg.wParam)
+			{
+				case VK_UP:
+				{
+					char buf[] = { GAME_OPT_UP };
+					Client::getInstance()->addOpts(buf, 1);
+					break;
+				}
+				case VK_DOWN:
+				{
+					char buf[] = { GAME_OPT_DOWN };
+					Client::getInstance()->addOpts(buf, 1);
+					break;
+				}
+				case VK_LEFT:
+				{
+					char buf[] = { GAME_OPT_LEFT };
+					Client::getInstance()->addOpts(buf, 1);
+					break;
+				}
+				case VK_RIGHT:
+				{
+					char buf[] = { GAME_OPT_RIGHT };
+					Client::getInstance()->addOpts(buf, 1);
+					break;
+				}
+			}
+		}
 		
 		if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {
@@ -317,18 +308,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case IDM_MY_CLIENT_START_OK:
 	{
 		waiting_property = CLIENT_ALL_START;
-		//hsender_mutex = CreateMutex(NULL, false, L"SENDER BUFFER");
-		//if (hsender_mutex == NULL)
-		//{
-		//	::MessageBox(hWnd, L"Create Mutex FAILED", L"ERROR", NULL);
-		//	break;
-		//}
-		hsender_thd = CreateThread(NULL, 0, MySenderThreadPro, NULL, 0, &hsender_thd_id);
-		if (hsender_thd == NULL)
-		{
-			::MessageBox(hWnd, L"Create Sender Thread FAILED", L"ERROR", NULL);
-			break;
-		}
 		winGame.show();
 		break;
 	}
@@ -359,8 +338,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
+		// TODO: 关闭所有线程
+	{
+		//Server::getInstance()->stop();
+		//Client::getInstance()->stop();
+		//waiting_property = CLIENT_OK;
+		//if (hwaiting_thd != NULL) ExitThread(hwaiting_thd_id);
+		//if (hserv_thd != NULL) ExitThread(hserv_thd_id);
+		//if (hclient_thd != NULL) ExitThread(hclient_thd_id);
+		PostQuitMessage(0);
+		break;
+	}
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
@@ -545,14 +533,14 @@ void initClientFrame(HWND hWnd)
 
 	// 多播地址
 	HWND hlab_found_mc_ip = CreateWindowW(L"static",   TEXT("  多播IP:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		50, 110, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
+		20, 110, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
 	htxt_found_mc_ip = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER,
-		140, 110, 190, 25, hclientFrame, (HMENU)IDT_CLIE_MC_IP, hInst, NULL);
+		100, 110, 120, 25, hclientFrame, (HMENU)IDT_CLIE_MC_IP, hInst, NULL);
 	// 多播端口
 	HWND hlab_found_mc_port = CreateWindowW(L"static", TEXT("多播端口:"), WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-		50, 140, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
+		20, 140, 80, 25, hclientFrame, (HMENU)default_id++, hInst, nullptr);
 	htxt_found_mc_port = CreateWindowW(L"edit", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-		140, 140, 190, 25, hclientFrame, (HMENU)IDT_CLIE_MC_PORT, hInst, NULL);
+		100, 140, 120, 25, hclientFrame, (HMENU)IDT_CLIE_MC_PORT, hInst, NULL);
 	// 列表框
 	hlist_serv_name = CreateWindowW(L"listbox", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL,
 		80, 180, 240, 120, hclientFrame, (HMENU)IDCB_CLIE_BOX, hInst, nullptr);
@@ -595,6 +583,12 @@ void initClientFrame(HWND hWnd)
 
 void freshListBox(HWND hWnd)
 {
+	//// 查找结果
+	static HWND htxt_listRes = CreateWindowW(L"static", L"", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+		220, 110, 180, 55, hclientFrame, (HMENU)IDT_CLIE_FOUND_RESULT, hInst, nullptr);
+	static HFONT hfont = MYCREATEFRONT(16, 8, FW_LIGHT);
+	::SendMessage(htxt_listRes, WM_SETFONT, (WPARAM)hfont, NULL);
+
 	char mc_ip[IP_LENGTH] = { 0 };
 	int mc_port = 0;
 	WCHAR buf[BUFSIZE] = { 0 };
@@ -619,21 +613,24 @@ void freshListBox(HWND hWnd)
 	Client* cp = Client::getInstance();
 	// TODO: 客户端查找服务器
 	if (cp->findServer(mc_ip, mc_port, MAX_FOUND_SERVER, MAX_FOUND_TIME, fdservs) < 0) {
-		::MessageBox(hWnd, L"FAILED", L"查找错误", NULL);
+		::SendMessage(htxt_listRes, WM_SETTEXT, NULL, (LPARAM)L"ERROR");
 		return;
 	}
 	if (fdservs.found == 0) {
-		::MessageBox(hWnd, L"没有找到房间", L"查找超时", NULL);
+		::SendMessage(htxt_listRes, WM_SETTEXT, NULL, (LPARAM)L"NO FOUND");
 		return;
 	}
+	char tmp[100] = { 0 };
+	sprintf_s(tmp, 100, "FOUND: %d", fdservs.found);
+	USES_CONVERSION;
+	WCHAR* p = A2W(tmp);
+	::SendMessage(htxt_listRes, WM_SETTEXT, NULL, (LPARAM)p);
 	// TODO: 重设列表项
 	::SendMessage(hlist_serv_name, LB_RESETCONTENT, NULL, NULL);
-	char tmp[BUFSIZE] = { 0 };
 	for (int i = 0; i < fdservs.found; ++i)
 	{
 		sprintf_s(tmp, "%s %s %d", fdservs.name[i], fdservs.ip[i], fdservs.port[i]);
-		USES_CONVERSION;
-		WCHAR* p = A2W(tmp);
+		p = A2W(tmp);
 		::SendMessage(hlist_serv_name, LB_ADDSTRING, NULL, (LPARAM)p);
 	}
 }
@@ -685,13 +682,6 @@ void startFromServFrame(HWND hWnd)
 		return;
 	}
 	// TODO: 启动服务器 和 本地客户端
-	// 设置本地 IP 和端口
-	if (!MyGetLocalIP(client_property.serv_ip))
-	{
-		::MessageBox(hWnd, L"Get Local IP FAILED", L"ERROR", NULL);
-		return;
-	}
-	client_property.serv_port = serv_property.port;
 	// 启动服务器线程
 	hserv_thd = CreateThread(NULL, 0, MyServThreadPro, NULL, 0, &hserv_thd_id);
 	if (hserv_thd == NULL)
@@ -709,6 +699,9 @@ void startFromServFrame(HWND hWnd)
 		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
 		return;
 	}
+	// 设置本地 IP 和端口
+	::memcpy(client_property.serv_ip, "127.0.0.1", IP_LENGTH);
+	client_property.serv_port = serv_property.port;
 	// 启动本地客户端线程
 	hclient_thd = CreateThread(NULL, 0, MyClientThreadPro, NULL, 0, &hclient_thd_id);
 	if (hclient_thd == NULL)
@@ -770,37 +763,6 @@ int wcharToInt(const WCHAR* wch)
 	return res;
 }
 
-bool MyGetLocalIP(char* dst)
-{
-	WSADATA wsa;
-	if (::WSAStartup(MAKEWORD(2, 2), &wsa) < 0)
-		return false;
-	char hostname[255] = { 0 };
-	if (::gethostname(hostname, sizeof(hostname)) != 0)
-	{
-		WSACleanup();
-		return false;
-	}
-	HOSTENT* phost = ::gethostbyname(hostname);
-	in_addr addr;
-	for (int i = 0;; ++i)
-	{
-		char* p = phost->h_addr_list[i];
-		if (p == NULL) break;
-		::memcpy(&addr.S_un.S_addr, p, phost->h_length);
-		p = ::inet_ntoa(addr);
-
-		::memcpy(dst, p, sizeof(char) * IP_LENGTH);
-	}
-	//char buf[BUFSIZE] = { 0 };
-	//sprintf_s(buf, "%s", dst);
-	//USES_CONVERSION;
-	//WCHAR* wch = A2W(buf);
-	//::MessageBox(NULL, wch, L"", NULL);
-	WSACleanup();
-	return true;;
-}
-
 DWORD __stdcall MyServThreadPro(LPVOID lpParam)
 {
 	Server* sp = Server::getInstance();
@@ -825,7 +787,7 @@ DWORD __stdcall MyClientThreadPro(LPVOID lpParam)
 	int len = cp->connServer(client_property.serv_ip, client_property.serv_port, initenv);
 	if (len < 0)
 	{
-		::MessageBox(hRoot, L"Client Connect Failed", L"Thread ERROR", NULL);
+		//::MessageBox(hRoot, L"Client Connect Failed", L"Thread ERROR", NULL);
 		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
 		return 1;
 	}
@@ -868,24 +830,13 @@ DWORD __stdcall MyWaitingThreadPro(LPVOID)
 			::SendMessage(hlab_waiting, WM_SETTEXT, NULL, (LPARAM)L"  Connect FAILED!");
 			return 0;
 		case CLIENT_ALL_START:
+		default:
 			::ShowWindow(hlab_waiting, SW_HIDE);
 			return 0;
 		}
 		p = A2W(buf);
 		::SendMessage(hlab_waiting, WM_SETTEXT, NULL, (LPARAM)p);
 		std::this_thread::sleep_for(std::chrono::milliseconds(300));
-	}
-	return 0;
-}
-
-DWORD __stdcall MySenderThreadPro(LPVOID lpParam)
-{
-	char buf[BUFSIZE] = { 0 };
-	Client* cp = Client::getInstance();
-	while (waiting_property == CLIENT_ALL_START)
-	{
-		if (startpos == endpos) Sleep(20);
-		
 	}
 	return 0;
 }

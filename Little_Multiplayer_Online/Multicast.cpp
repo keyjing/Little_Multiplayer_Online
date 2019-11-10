@@ -169,7 +169,7 @@ int Multicast::receiver(int maxfound, int time_limit, char msg[][MC_MSG_LENGTH],
 	long long* foundip_hash = new long long[maxfound]();
 	while (record < maxfound && count++ < maxfound)
 	{
-		this_thread::sleep_for(chrono::milliseconds(time_limit / maxfound));
+		//this_thread::sleep_for(chrono::milliseconds(20));
 		FD_ZERO(&rfds);
 		FD_SET(sock, &rfds);
 		if (::select(0, &rfds, NULL, NULL, &timeout) <= 0)

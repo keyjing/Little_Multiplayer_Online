@@ -28,6 +28,7 @@
 #define IDB_CLIE_FRESH			2722
 #define IDT_CLIE_MC_IP			2723
 #define IDT_CLIE_MC_PORT		2774
+#define IDT_CLIE_FOUND_RESULT	2775
 
 // 游戏盘界面
 #define IDT_MY_TABLE_0			3000
