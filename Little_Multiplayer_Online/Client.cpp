@@ -1,12 +1,14 @@
 #include "Client.h"
 #include<iostream>
 #include"MyEasyLog.h"
+#include"MySecurity.h"
 using namespace std;
 
 Client* Client::cp = nullptr;
 
 #ifdef _DEBUG
-static volatile int cnt = 0;
+static volatile int client_send_cnt = 0;
+static volatile int client_recv_cnt = 0;
 #endif // _DEBUG
 
 Client::~Client()
@@ -18,14 +20,14 @@ Client::~Client()
 }
 
 // 进行消息挑选，找出正确的服务器
-static int checkMessage(const char msg[][BUFSIZE], const char ip[][IP_LENGTH], int found, FoundServerResult& fdservs)
+static int checkMessage(const char msg[][MC_MSG_LENGTH], const char ip[][IP_LENGTH], int found, FoundServerResult& fdservs)
 {
 	fdservs.found = 0;
 	int pos = -1;
 	while (++pos < found)
 	{
 		int found_port = 0;
-		char found_name[BUFSIZE] = { 0 };
+		char found_name[MC_MSG_LENGTH] = { 0 };
 		try {
 			int i = 0;
 			while (msg[pos][i] >= '0' && msg[pos][i] <= '9')
@@ -41,7 +43,7 @@ static int checkMessage(const char msg[][BUFSIZE], const char ip[][IP_LENGTH], i
 			found_name[len] = '\0';
 		}
 		catch (...) {
-			MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER CATCH MSG", msg[pos]);
+			MyEasyLog::write(LOG_WARNING, "CLIENT CHECK SERVERS", "Catch Exception");
 			continue;
 		}
 		::memcpy(fdservs.name[fdservs.found], found_name, sizeof(char) * BUFSIZE);
@@ -73,7 +75,7 @@ int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_li
 		MyEasyLog::write(LOG_WARNING, "CLIENT FOUND SERVER", "OVERFLOW");
 		return FOUND_SERV_OVERFLOW;
 	}
-	char msg[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
+	char msg[MAX_FOUND_SERVER][MC_MSG_LENGTH] = { {0} };
 	char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
 
 	Multicast mc(mc_ip, mc_port);
@@ -84,11 +86,12 @@ int Client::findServer(const char* mc_ip, int mc_port, int maxfound, int time_li
 		MyEasyLog::write(LOG_WARNING, "CLIENT FIND SERVER", "FAILED");
 		return NO_FOUND_SERVER;
 	}
+	MyEasyLog::write(LOG_NOTICE, "CLIENT FIND SERVER FOUND", found);
 	// TODO: 消除错误的信息
 	return checkMessage(msg, ip, found, fdservs);
 }
 
-int Client::connServer(const char* server_ip, int serv_port)
+int Client::connServer(const char* server_ip, int serv_port, char* initenv)
 {
 	if (server_ip == NULL || server_ip[0] == '\0') {
 		MyEasyLog::write(LOG_ERROR, "CLIENT CONNECT BY IP", "NULL IP");
@@ -116,18 +119,52 @@ int Client::connServer(const char* server_ip, int serv_port)
 		return CLIENT_ERROR;
 	}
 	char buffer[BUFSIZE] = { 0 };
-	// 获取服务器的 客户端数 和 自己的位置
-	if (::recv(servSock, buffer, 2, 0) < 0) {
-		MyEasyLog::write(LOG_ERROR, "CLIENT RECEIVER", "Receive Initialization FAILED");
+	// 对接暗号
+	if (!MySecurity::getPasswd(buffer) || ::send(servSock, buffer, BUFSIZE, 0) < 0) {
+		MyEasyLog::write(LOG_ERROR, "CLIENT CONN SEND", "Send Passwd FAILED");
 		::closesocket(servSock);
 		return CLIENT_ERROR;
 	}
-	clients = buffer[0];
-	index = buffer[1];
+	// 等待回应
+	struct fd_set rfds;
+	struct timeval timeout = { 0, 100 };
+	for (int i = 0; i < 100; ++i)
+	{
+		//this_thread::sleep_for(chrono::milliseconds(100));
+		FD_ZERO(&rfds);
+		FD_SET(servSock, &rfds);
+		int res = ::select(0, &rfds, NULL, NULL, &timeout);
+		if (res > 0) break;		//有回应
+		else if (res == 0 && i != 99)		// 超时
+			continue;
+		// 连接断开或超时 100 次
+		MyEasyLog::write(LOG_ERROR, "CLIENT CONN", "Wait Server Response FAILED");
+		::closesocket(servSock);
+		return CLIENT_ERROR;
+	}
+	// 获取服务器的 客户端数 和 自己的位置
+	if (::recv(servSock, buffer, BUFSIZE, 0) < 0) {
+		MyEasyLog::write(LOG_ERROR, "CLIENT CONN", "Receive Server Response FAILED");
+		::closesocket(servSock);
+		return CLIENT_ERROR;
+	}
+	if (!MySecurity::isPass(buffer))
+	{
+		MyEasyLog::write(LOG_ERROR, "CLIENT CONN", "CANNOT Get Server PASS");
+		::closesocket(servSock);
+		return CLIENT_ERROR;
+	}
+	MyEasyLog::write(LOG_NOTICE, "CLIENT CONN", "Get Server PASS");
+	clients = buffer[MY_SECURITY_LENGTH];
+	index = buffer[MY_SECURITY_LENGTH + 1];
 	ostringstream ostr;
-	ostr << "Index in " << (int)buffer[1] << " / " << (int)buffer[0];
+	ostr << "Index in " << index << " / " << clients;
 	MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE INITIALIZATION", ostr.str());
-	return CLIENT_SUCCESS;
+	// 初始环境信息
+	int len = 0;
+	while (buffer[MY_SECURITY_LENGTH + 2 + len] != MY_MSG_BOARD) ++len;
+	::memcpy(initenv, buffer + MY_SECURITY_LENGTH + 2, sizeof(char) * len);
+	return len;
 }
 
 int Client::addOpts(const char* opts, int len)
@@ -140,11 +177,7 @@ int Client::addOpts(const char* opts, int len)
 		MyEasyLog::write(LOG_ERROR, "CLIENT ADD OPTIONS", "Options Added OVERFLOW.");
 		return CLIENT_ERROR;
 	}
-	char buffer[BUFSIZE] = { 0 };
-	::memcpy(buffer, opts, sizeof(char) * len);	
-#ifdef _DEBUG
-	cnt += len;			//统计发送字节数
-#endif // _DEBUG
+	// TODO: 改用Thread进行
 	unique_lock<mutex> locker_msg(mt_send_msg);
 	while (msg_endpos + len > BUFSIZE) {
 		unique_lock<mutex> locker_sign(mt_signal);		// 立即发送
@@ -158,7 +191,7 @@ int Client::addOpts(const char* opts, int len)
 	locker_msg.unlock();
 	cond_send_msg.notify_one();
 
-	return CLIENT_SUCCESS;
+	return CLIENT_OK;
 }
 
 void Client::send_thd(void)
@@ -169,7 +202,7 @@ void Client::send_thd(void)
 	while (cp->running) {
 		// 获取副本
 		unique_lock<mutex> locker_buf(cp->mt_send_msg);
-		if (cp->msg_endpos <= 0) {
+		if (cp->msg_endpos <= 0) {		// 没有数据，重新等待
 			locker_buf.unlock();
 			cp->cond_send_msg.notify_one();
 			this_thread::sleep_for(chrono::milliseconds(20));
@@ -181,6 +214,9 @@ void Client::send_thd(void)
 		cp->msg_endpos = 0;
 		locker_buf.unlock();
 		cp->cond_send_msg.notify_one();
+#ifdef _DEBUG
+		client_send_cnt += end_bk;		//统计发送字节数
+#endif // _DEBUG
 		// 通过副本发送
 		MyEasyLog::write(LOG_NOTICE, "CLIENT SEND", buffer);
 		if(::send(cp->servSock, buffer, sizeof(char) * end_bk, 0) < 0){
@@ -225,36 +261,16 @@ void Client::recv_thd(void)
 			MyEasyLog::write(LOG_WARNING, "CLIENT RECEIVE THREAD", "No Post Man.");
 			continue;
 		}
-		int pos = 0;
-		while (pos < ret)
+		for (int pos = 0; pos < ret;)
 		{
 			int id = buffer[pos];
 			int begin = ++pos;
 			while (pos < ret && buffer[pos] != MY_MSG_BOARD) pos++;
+#ifdef _DEBUG
+			client_recv_cnt += pos - begin;		// 统计接收字节数
+#endif // _DEBUG
 			cp->postman->delivery(id, buffer + begin, pos - begin);
 		}
-//		buffer[ret] = '\0';
-//#ifdef _DEBUG
-//		ostringstream ostr;
-//		ostr << endl;
-//		for (int i = 0; i < ret; ++i)
-//		{
-//			int index = buffer[i++];
-//			char msg[BUFSIZE] = { 0 };
-//			int end = 0;
-//			while (i < ret && buffer[i] != MY_MSG_BOARD)
-//				msg[end++] = buffer[i++];
-//			msg[end] = '\0';
-//			ostr << "CLIENT " << index << ": " << msg << endl;
-//			if (index == cp->index) cout << msg;
-//		}
-//		MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE", ostr.str());
-//#endif // DEBUG
-//		 写入接收缓冲区
-//		unique_lock<mutex> locker_recv(cp->mt_recv_msg);
-//		::memcpy(cp->recv_msg, buffer, sizeof(cp->recv_msg));
-//		locker_recv.unlock();
-//		cp->cond_recv_msg.notify_one();
 	}
 	MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE THREAD", "FINISHED");
 	cp->thd_finished();
@@ -268,13 +284,17 @@ void Client::thd_finished()
 	cond_thds.notify_one();
 }
 
-int Client::start(const char* server_ip, int serv_port)
+int Client::start()
 {
-	if (connServer(server_ip, serv_port) < 0)
+	//if (connServer(server_ip, serv_port) < 0)
+	//	return CLIENT_ERROR;
+	if (servSock == INVALID_SOCKET || clients == 0 || index == 0)	// 尚未连接
 		return CLIENT_ERROR;
 
 	char buffer[BUFSIZE] = { 0 };
-	buffer[0] = MY_MSG_OK;
+	MySecurity::getPasswd(buffer);	//暗号
+	buffer[MY_SECURITY_LENGTH] = MY_MSG_OK;
+
 	if (::send(servSock, buffer, BUFSIZE, 0) < 0) {				// 告诉服务器准备就绪
 		MyEasyLog::write(LOG_ERROR, "CLIENT START SEND OK", "FAILED");
 		return CLIENT_ERROR;
@@ -287,21 +307,23 @@ int Client::start(const char* server_ip, int serv_port)
 	//	MyEasyLog::write(LOG_NOTICE, "CLIENT START", "Time Out");
 	//	return CLIENT_ERROR;
 	//}
-	int ret = ::recv(servSock, buffer, BUFSIZE, 0);
-	if (ret < 0) {
-		MyEasyLog::write(LOG_ERROR, "CLIENT START RECEIVE OK", "FAILED");
-		return CLIENT_ERROR;
+	while (1)
+	{
+		int ret = ::recv(servSock, buffer, BUFSIZE, 0);
+		if (ret < 0) {
+			MyEasyLog::write(LOG_ERROR, "CLIENT START RECEIVE OK", "FAILED");
+			return CLIENT_ERROR;
+		}
+		if (MySecurity::isPass(buffer)) break;
 	}
-	if (buffer[0] != MY_MSG_OK) {
+	if (buffer[MY_SECURITY_LENGTH] != MY_MSG_OK) {
 		MyEasyLog::write(LOG_WARNING, "CLIENT START RECEIVE OK", "REFUSED");
 		return CLIENT_ERROR;
 	}
 	// TODO: 处理从服务端接收的初始化信息 buffer: 1 ~ MY_MSG_BOARD
 
-
-
-
 	MyEasyLog::write(LOG_NOTICE, "CLIENT START", "Initialize OK");
+	// 启动线程的初始数据设置
 	running = true;
 	msg_endpos = 0;
 	clock_signal = false;
@@ -310,7 +332,7 @@ int Client::start(const char* server_ip, int serv_port)
 	thread receiver(recv_thd);
 	sender.detach();
 	receiver.detach();
-	return CLIENT_SUCCESS;
+	return CLIENT_ALL_START;
 }
 
 void Client::stop()
@@ -323,6 +345,7 @@ void Client::stop()
 	locker.unlock();
 	MyEasyLog::write(LOG_NOTICE, "CLIENT THREAD", "All Thread STOP.");
 #ifdef _DEBUG
-	MyEasyLog::write(LOG_NOTICE, "CLIENT COUNT", (int)cnt);
+	MyEasyLog::write(LOG_NOTICE, "CLIENT SEND COUNT", (int)client_send_cnt);
+	MyEasyLog::write(LOG_NOTICE, "CLIENT RECEIVE COUNT", (int)client_recv_cnt);
 #endif // _DEBUG
 }

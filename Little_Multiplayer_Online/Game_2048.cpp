@@ -30,8 +30,11 @@ Game_2048::Game_2048(int seed)
 	matrix[row2][col2] = GAME_SEED_CREATE;
 }
 
-Game_2048::~Game_2048()
+int Game_2048::get(int i, int j) const
 {
+	if (i < 0 || i >= GAME_SIZE || j < 0 || j >= GAME_SIZE)
+		return 0;
+	return matrix[i][j];
 }
 
 int Game_2048::addSeedWithCheck(int seed)

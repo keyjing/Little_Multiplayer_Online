@@ -32,6 +32,10 @@ public:
 		return sp;
 	}
 
+	bool isAllClientsStart() const { return clients == conn; }
+	void setControlOption(ControlOption* cp) { if (ctrlOpt) delete ctrlOpt; ctrlOpt = cp; }
+	bool isRunning() { return running; }
+
 	// 启动服务器
 	// @ parameter
 	// @ servName: 服务器名

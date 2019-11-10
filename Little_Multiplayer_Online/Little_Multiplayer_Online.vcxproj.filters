@@ -47,5 +47,8 @@
     <ClInclude Include="Game_2048.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="MySecurity.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

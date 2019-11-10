@@ -2,14 +2,14 @@
 #include<iostream>
 //#include<exception>
 #include"MyEasyLog.h"
-
+#include"MySecurity.h"
 using namespace std;
 
 Server* Server::sp = nullptr;
 
 #ifdef _DEBUG
-static volatile int recv_cnt = 0;
-static volatile int send_cnt = 0;
+static volatile int serv_recv_cnt = 0;
+static volatile int serv_send_cnt = 0;
 #endif // _DEBUG
 
 /*			Server 类			*/
@@ -62,8 +62,26 @@ void Server::waitConnect(const char* servName, int servPort, const char* mc_ip, 
 	SOCKET cSock;		// 临时客户端套接字
 	sockaddr_in addr;
 	int addrSize = sizeof(SOCKADDR);
+	// 发送给客户端的初始化环境信息: 总客户数, ID, 其他初始环境信息
+	char initenv[BUFSIZE] = { 0 };
+	if (!MySecurity::getPasswd(initenv))
+	{
+		MyEasyLog::write(LOG_ERROR, "SERVER CONN", "Get Password FAILED!");
+		::closesocket(sock);
+		return;
+	}
+	initenv[MY_SECURITY_LENGTH] = sp->clients;
+	int len = MY_SECURITY_LENGTH + 2;		// 暗号后: 客户总数、客户ID、其他信息
+	if (sp->ctrlOpt)
+	{
+		len += sp->ctrlOpt->createOpt(initenv + len, BUFSIZE - len - 1);
+	}
+	initenv[len++] = MY_MSG_BOARD;
 	long long clients_ip_hash[MAX_CONNECT] = { 0 };		// 客户端 IP 转换的 hasn 值，用于查询是否已记录
 	char buffer[BUFSIZE] = { 0 };
+	struct fd_set rfds;
+	struct timeval timeout = { 0, 20 };
+	int res = 0;
 	while (sp->conn <= sp->clients)
 	{
 		cSock = accept(sock, (SOCKADDR*)&addr, &addrSize);
@@ -86,10 +104,33 @@ void Server::waitConnect(const char* servName, int servPort, const char* mc_ip, 
 			closesocket(cSock);
 			continue;
 		}
-		buffer[0] = sp->clients; buffer[1] = sp->conn;
+		// 对接暗号
+		bool nagitive = false;
+		for (int i = 0; i < 100; ++i)
+		{
+			//this_thread::sleep_for(chrono::milliseconds(20));
+			FD_ZERO(&rfds);
+			FD_SET(cSock, &rfds);
+			res = ::select(0, &rfds, NULL, NULL, &timeout);
+			if (res > 0) break;		// 有回应
+			else if (res == 0 && i != 99)	//超时
+				continue;
+			// 断开或超时太久
+			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT", "Nagitive");
+			::closesocket(cSock);
+			nagitive = true;
+		}
+		if (nagitive) continue;
+		if (::recv(cSock, buffer, BUFSIZE, 0) < 0)
+		{
+			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT", "Receive Password FAILED");
+			::closesocket(cSock);
+			continue;
+		}
+		initenv[MY_SECURITY_LENGTH + 1] = sp->conn;	// 客户端记录的 ID
 		// 发送失败，放弃
-		if (send(cSock, buffer, 2, 0) < 0) {
-			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT SEND", "FAILED");
+		if (send(cSock, initenv, BUFSIZE, 0) < 0) {
+			MyEasyLog::write(LOG_NOTICE, "SERVER CONNECT", "Send initenv FAILED");
 			closesocket(cSock);
 			continue;
 		}
@@ -175,7 +216,7 @@ void Server::recv_thd(void)
 				sp->msg[sp->msg_endpos++] = i;				// 客户端 ID
 				::memcpy(sp->msg + sp->msg_endpos, buffer, sizeof(char) * ret);	
 #ifdef _DEBUG
-				recv_cnt += ret;	// 统计接收字节数
+				serv_recv_cnt += ret;	// 统计接收字节数
 #endif // _DEBUG
 				sp->msg_endpos += ret;
 				sp->msg[sp->msg_endpos++] = MY_MSG_BOARD;	// 消息的边界符号
@@ -204,6 +245,12 @@ void Server::send_thd(void)
 	char buffer[BUFSIZE + 1] = { 0 };
 	int end_bk = 0;
 	while (sp->running) {
+		unique_lock<mutex> locker_signal(sp->mt_signal);	// 等待发送信号
+		while (!sp->clock_signal) sp->cond_signal.wait(locker_signal);
+		sp->clock_signal = false;
+		locker_signal.unlock();
+		sp->cond_signal.notify_one();
+
 		unique_lock<mutex> locker_sock(sp->mt_sock);	//获取套接字副本
 		::memcpy(socks, sp->clientsSock, sizeof(sp->clientsSock));
 		locker_sock.unlock();
@@ -213,7 +260,6 @@ void Server::send_thd(void)
 		::memcpy(buffer, sp->msg, sizeof(sp->msg));
 		end_bk = sp->msg_endpos;
 		// 清空缓冲区
-		::memset(sp->msg, 0, sizeof(sp->msg));
 		sp->msg_endpos = 0;
 		if (sp->ctrlOpt)
 		{
@@ -226,7 +272,7 @@ void Server::send_thd(void)
 		locker_msg.unlock();
 		sp->cond_msg.notify_one();
 
-		if (end_bk == 0) continue;
+		if (end_bk <= 0) continue;		// 没消息
 
 #ifdef _DEBUG	// 只在 DEBUG 模式下将发送信息写入日志
 		ostringstream ostr;
@@ -237,7 +283,7 @@ void Server::send_thd(void)
 			while (i < end_bk && buffer[i] != MY_MSG_BOARD)
 			{
 				ostr << buffer[i++];
-				send_cnt++;		// 统计发送字节数
+				serv_send_cnt++;		// 统计发送字节数
 			}
 			ostr << endl;
 		}
@@ -309,24 +355,30 @@ int Server::start(const char* servName, int servPort, int clients, const char* m
 					MyEasyLog::write(LOG_ERROR, "SERVER START RECEIVE FAILED FORM INDEX", i);
 					continue;
 				}
-				if (buffer[0] == MY_MSG_OK) {
+				if (ret <= MY_SECURITY_LENGTH) {
+					MyEasyLog::write(LOG_WARNING, "SERVER START RECEIVE PASSWD FAILED FORM INDEX", i);
+					continue;
+				}
+				if (MySecurity::isPass(buffer) && buffer[MY_SECURITY_LENGTH] == MY_MSG_OK) {
 					bits ^= (1 << (i - 1));		// 异或运算，去除该位
 					MyEasyLog::write(LOG_NOTICE, "SERVER START RECEIVE OK FROM INDEX", i);
 				}
 			}
 		}
 	}
-	buffer[0] = (bits == 0) ? MY_MSG_OK : MY_MSG_FAILED;
-	int len = 1;
+	// 暗号
+	MySecurity::getPasswd(msg);
+	msg_endpos = MY_SECURITY_LENGTH;
+	msg[msg_endpos++] = (bits == 0) ? MY_MSG_OK : MY_MSG_FAILED;
 	// TODO: 附带初始化信息
 	if (ctrlOpt) {
-		buffer[len++] = 0;
-		len += ctrlOpt->createOpt(buffer + len, BUFSIZE - 1);
-		buffer[len++] = MY_MSG_BOARD;
+		msg[msg_endpos++] = 0;
+		msg_endpos += ctrlOpt->createOpt(msg + msg_endpos, BUFSIZE - 1);
+		msg[msg_endpos++] = MY_MSG_BOARD;
 	}
-	for (int i = 1; i <= clients; ++i) {		// 通知所有客户端都已经就绪jf
+	for (int i = 1; i <= clients; ++i) {		// 通知所有客户端都已经就绪
 		if (clientsSock[i] == INVALID_SOCKET) continue;
-		if (::send(clientsSock[i], buffer, sizeof(char) * len, 0) <= 0) {
+		if (::send(clientsSock[i], msg, sizeof(char) * BUFSIZE, 0) <= 0) {
 			MyEasyLog::write(LOG_ERROR, "SERVER START", "Send All Clients OK FAILED.");
 			return SERV_ERROR_SOCK;
 		}
@@ -359,7 +411,7 @@ void Server::stop()
 	locker_thds.unlock();
 	MyEasyLog::write(LOG_NOTICE, "SERVER THREAD", "All Thread Stop.");
 #ifdef _DEBUG
-	MyEasyLog::write(LOG_NOTICE, "SERVER RECV COUNT", (int)recv_cnt);
-	MyEasyLog::write(LOG_NOTICE, "SERVER SEND COUNT", (int)send_cnt);
+	MyEasyLog::write(LOG_NOTICE, "SERVER RECV COUNT", (int)serv_recv_cnt);
+	MyEasyLog::write(LOG_NOTICE, "SERVER SEND COUNT", (int)serv_send_cnt);
 #endif // _DEBUG
 }

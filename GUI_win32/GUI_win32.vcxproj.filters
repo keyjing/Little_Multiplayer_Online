@@ -27,9 +27,21 @@
     <ClInclude Include="GUI_win32.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="GameTable_2048.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="WinGameControl.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="GUI_win32.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="GameTable_2048.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="WinGameControl.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

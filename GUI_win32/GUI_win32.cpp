@@ -3,55 +3,76 @@
 
 #include "framework.h"
 #include "GUI_win32.h"
+
 #include "../Little_Multiplayer_Online/Multicast.h"
 #include "../Little_Multiplayer_Online/Server.h"
 #include "../Little_Multiplayer_Online/Client.h"
+#include "../Little_Multiplayer_Online/Game_2048.h"
+#include "../Little_Multiplayer_Online/Game_2048.cpp"
 #include "../Little_Multiplayer_Online/Multicast.cpp"
 #include "../Little_Multiplayer_Online/Server.cpp"
 #include "../Little_Multiplayer_Online/Client.cpp"
+#include"WinGameControl.h"
+#include "GameTable_2048.h"
 
 #include<atlconv.h>
+#include<thread>
+
+using std::thread;
 
 #define MY_MAIN_TITLE			"2048小游戏"
+#define MY_WAITING_SERVER_LABLE		"  Connect to Server..."
+#define MY_WAITING_OTHERS_LABLE		"    Waiting Others... "
 
-#define DEFAULT_SERV_PORT		"1234"
+#define DEFAULT_SERV_PORT		"30000"
 #define MAX_FOUND_TIME			3000
 
 #define MAX_LOADSTRING			100
-#define MY_GAME_SIZE			4			// 游戏盘格式: 4x4
+
 #define MY_WIN_WIDTH			1000		// 窗口宽度
 #define MY_WIN_HEIGHT			600			// 窗口高度
 #define MY_MAX_PLAYERS			8
-// 游戏盘格式
-#define MY_TABLE_WIDTH			300			// 宽度
-#define MY_TABLE_HEIGHT			300			// 高度
-#define MY_ELEM_WIDTH			50			// 元素宽度
-#define MY_ELEM_HEIGHT			30			// 元素高度
-#define MY_COLS_WIDTH			4			// 列间隔
-#define MY_ROWS_HEIGHT			6			// 行间隔
-// Frame格式
-#define MY_TABLE_FRAME_WIDTH	230
-#define MY_TABLE_FRAME_HEIGHT	200
-#define MY_TF_WIDTH				10
-#define MY_TF_HEIGHT			50
-// 字体格式
-#define MYCREATEFRONT(x, y, weight)	CreateFont(-x /*高度*/, -y /*宽度*/, 0, 0, weight/*粗细*/, \
-	FALSE/*斜体?*/, FALSE/*下划线?*/, FALSE/*删除线?*/, DEFAULT_CHARSET, \
-	OUT_CHARACTER_PRECIS, CLIP_CHARACTER_PRECIS, DEFAULT_QUALITY, \
-	FF_DONTCARE, TEXT("新宋体"))
+
 
 // 全局变量:
 HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
+HWND hRoot;
 
 // TODO: 全局数据
-Server* sp = nullptr;
-Client* cp = nullptr;
+struct FoundServerResult fdservs;					// 客户端界面列表
+WinGameControl winGame(MY_MAX_PLAYERS);				// 游戏盘	
 
-struct FoundServerResult fdservs;
+HANDLE hserv_thd = NULL;		// 服务器启动线程
+DWORD hserv_thd_id;				// 线程ID
+static struct ServerProperty	// 服务器配置
+{
+	char name[BUFSIZE] = { 0 };
+	int clients = 0;
+	int port = 0;
+	char mc_ip[IP_LENGTH] = { 0 };
+	int mc_port = 0;
+}serv_property;	
 
-//int players = 0;
+HANDLE hclient_thd = NULL;		// 客户端启动线程
+DWORD hclient_thd_id;			// 线程IP
+static struct ClientProperty	// 客户端配置
+{
+	char serv_ip[IP_LENGTH] = { 0 };
+	int serv_port = 0;
+}client_property;
+
+HANDLE hwaiting_thd = NULL;			// 等待连接时控制输出信息线程
+DWORD hwaiting_thd_id;				// 线程ID
+volatile int waiting_property = 0;	// 等待状态
+
+HANDLE hsender_thd = NULL;
+DWORD  hsender_thd_id;
+volatile char sender_buf[BUFSIZE] = { 0 };
+volatile int startpos = 0;
+volatile int endpos = 0;
+//HANDLE hsender_mutex;
 
 // TODO: 全局控件
 HWND hmainFrame;		// 主界面
@@ -68,9 +89,7 @@ HWND hlist_serv_name;		// 服务器列表
 HWND htxt_found_mc_ip;		// 查找多播地址
 HWND htxt_found_mc_port;	// 查找多播端口
 
-HWND htabFrame[8];									// 游戏盘所在 Frame
-HWND hGameTable[8][MY_GAME_SIZE][MY_GAME_SIZE];		// 游戏盘控件， 8人的 4X4
-HWND hGameRes[8];									// 结果
+HWND hlab_waiting;
 
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -79,15 +98,21 @@ LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 // TODO: 添加自己函数的向前声明:
-void	initGameTable(HWND, int);		// 创建游戏界面
-void	initMainFrame(HWND);			// 创建主界面
-void	initServFrame(HWND);			// 创建服务器界面
-void	initClientFrame(HWND);			// 创建客户端界面
-void	freshListBox(HWND);				// 刷新客户端界面的选择列表
-void	GetServFrameMsg(HWND);			// 获取服务端界面的信息，并进行处理
-void	GetClientFrameMsg(HWND);		// 获取客户端界面的信息，并进行处理
+void	initMainFrame(HWND);				// 创建主界面
+void	initServFrame(HWND);				// 创建服务器界面
+void	initClientFrame(HWND);				// 创建客户端界面
+void	initWinGameTable(const char*, int);			// 创建游戏盘界面
+void	freshListBox(HWND);					// 刷新客户端界面的选择列表
+void	startFromServFrame(HWND);			// 获取服务端界面的信息，并进行处理
+void	startFromClientFrame(HWND);			// 获取客户端界面的信息，并进行处理
 void	wcharToArrayChar(char*, const WCHAR*);
 int		wcharToInt(const WCHAR*);
+bool	MyGetLocalIP(char*);
+
+DWORD WINAPI MyServThreadPro(LPVOID);		// 服务器启动线程入口函数
+DWORD WINAPI MyClientThreadPro(LPVOID);		// 客户端启动线程入口函数
+DWORD WINAPI MyWaitingThreadPro(LPVOID);		// 客户端启动线程入口函数
+DWORD WINAPI MySenderThreadPro(LPVOID);
 
 // 原始的静态文本消息响应及自定义的消息响应
 WNDPROC	OriginStaticProc;									// 静态区域控件原本的响应函数	
@@ -132,11 +157,42 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 主消息循环:
     while (GetMessage(&msg, nullptr, 0, 0))
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+		// 消息截取
+		//if (msg.message == WM_KEYDOWN && waiting_property == CLIENT_ALL_START)
+		//{
+		//	switch (msg.wParam)
+		//	{
+		//		case VK_UP:
+		//		{
+		//			Sleep(100);
+		//			//char buf[] = { GAME_OPT_UP };
+		//			//Client::getInstance()->addOpts(buf, 1);
+		//			break;
+		//		}
+		//		case VK_DOWN:
+		//		{
+		//			//char buf[] = { GAME_OPT_DOWN };
+		//			//Client::getInstance()->addOpts(buf, 1);
+		//			break;
+		//		}
+		//		case VK_LEFT:
+		//		{
+		//			//char buf[] = { GAME_OPT_LEFT };
+		//			//Client::getInstance()->addOpts(buf, 1);
+		//			break;
+		//		}
+		//		case VK_RIGHT:
+		//		{
+		//			//char buf[] = { GAME_OPT_RIGHT };
+		//			//Client::getInstance()->addOpts(buf, 1);
+		//		}
+		//	}
+		//}
+		
+		if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {
             TranslateMessage(&msg);
-			if (LOWORD(msg.wParam) == IDB_CREATE_ROOM)
-				MessageBox(NULL, L"BB", L"BB", NULL);
+
             DispatchMessage(&msg);
         }
     }
@@ -203,6 +259,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
+   hRoot = hWnd;	// 保存到全局变量
+
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
 
@@ -221,17 +279,59 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	static HFONT hfont = MYCREATEFRONT(28, 14, FW_BOLD);
     switch (message)
     {
 	case WM_CREATE:
-		// TODO:
+		// TODO: 窗口初始化
 		initMainFrame(hWnd);
 		initServFrame(hWnd);
 		initClientFrame(hWnd);
-		initGameTable(hWnd, 1);
+		hlab_waiting = CreateWindowW(L"static", L"",
+			WS_CHILD /*| WS_VISIBLE | SS_CENTER*/ | SS_CENTERIMAGE,
+			MY_WIN_WIDTH / 2 - 170, MY_WIN_HEIGHT / 2 - 80, 340, 50,
+			hWnd, (HMENU)IDL_WAITING_LABEL, hInst, nullptr);
+		::SendMessage(hlab_waiting, WM_SETFONT, (WPARAM)hfont, NULL);
 		break;
-	//case WM_CTLCOLORSTATIC:
-	//	return (INT_PTR)GetStockObject(NULL_BRUSH);
+	// 线程执行出错，停止其他线程
+	case IDM_MY_THREAD_ERROR:
+	{
+		ExitThread(hserv_thd_id);
+		ExitThread(hclient_thd_id);
+		waiting_property = CLIENT_ERROR;
+		break;
+	}
+	// 客户端连接成功
+	case IDM_MY_CLIENT_CONN_OK:
+	{
+		// wparam: 环境设置字符串; lParam: 字符长度
+		char initenv[BUFSIZE] = { 0 };
+		int len = (int)lParam;
+		::memcpy(initenv, (char*)wParam, sizeof(char) * len);
+		initenv[len] = '\0';
+		initWinGameTable(initenv, len);
+		waiting_property = CLIENT_CONN_SUCCESS;
+		break;
+	}
+	// 服务端与所有客户端连接成功，可以开始传输数据
+	case IDM_MY_CLIENT_START_OK:
+	{
+		waiting_property = CLIENT_ALL_START;
+		//hsender_mutex = CreateMutex(NULL, false, L"SENDER BUFFER");
+		//if (hsender_mutex == NULL)
+		//{
+		//	::MessageBox(hWnd, L"Create Mutex FAILED", L"ERROR", NULL);
+		//	break;
+		//}
+		hsender_thd = CreateThread(NULL, 0, MySenderThreadPro, NULL, 0, &hsender_thd_id);
+		if (hsender_thd == NULL)
+		{
+			::MessageBox(hWnd, L"Create Sender Thread FAILED", L"ERROR", NULL);
+			break;
+		}
+		winGame.show();
+		break;
+	}
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
@@ -239,8 +339,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             switch (wmId)
             {
             case IDM_ABOUT:
-				//for (int i = 0; i < 8; ++i)
-				//	ShowWindow(htabFrame[i], bl ? SW_HIDE : SW_SHOW);
 				DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
             case IDM_EXIT:
@@ -303,21 +401,21 @@ LRESULT CALLBACK MyStaticProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 			switch (wmId)
 			{
 			case IDB_CREATE_ROOM:
-				sp = Server::getInstance();
+				//sp = Server::getInstance();
 				ShowWindow(hmainFrame, SW_HIDE);
 				ShowWindow(hservFrame, SW_SHOW);
 				break;
 			case IDB_JOIN_ROOM:
-				cp = Client::getInstance();
+				//cp = Client::getInstance();
 				ShowWindow(hmainFrame, SW_HIDE);
 				ShowWindow(hclientFrame, SW_SHOW);
 				freshListBox(hWnd);
 				break;
 			case IDB_SERV_OK:
-				GetServFrameMsg(hWnd);
+				startFromServFrame(hWnd);
 				break;
 			case IDB_CLIE_OK:
-				GetClientFrameMsg(hWnd);
+				startFromClientFrame(hWnd);
 				break;
 			case IDB_CLIE_FRESH:
 				// TODO:
@@ -340,70 +438,6 @@ LRESULT CALLBACK MyStaticProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 		return OriginStaticProc(hWnd, message, wParam, lParam);
 	}
 	return 0;
-}
-
-/*		进行表格元素布局
-* @parameter
-* @             hWnd: 父窗口句柄
-* @ htab, rows, cols: 表格元素句柄数组、行数、列数
-* @          startid: 起始 HMENU ID，有50个可用
-*/
-void initTabFrame(HWND hWnd, HWND htab[][MY_GAME_SIZE], int startid)
-{
-	int height_ocp = MY_ELEM_HEIGHT + MY_ROWS_HEIGHT;	// 实际占据高度
-	int width_ocp = MY_ELEM_WIDTH + MY_COLS_WIDTH;		// 实际占据宽度
-	int x = 2;
-	int y = 40;
-	static HFONT hfont = //MYCREATEFRONT(16, 8, FW_LIGHT);
-		CreateFont(-14 /*高度*/, -7 /*宽度*/, 0, 0, FW_LIGHT/*粗细*/, \
-			FALSE/*斜体?*/, FALSE/*下划线?*/, FALSE/*删除线?*/, DEFAULT_CHARSET, \
-			OUT_CHARACTER_PRECIS, CLIP_CHARACTER_PRECIS, DEFAULT_QUALITY, \
-			FF_DONTCARE, TEXT("微软雅黑"));
-	for (int i = 0; i < MY_GAME_SIZE; ++i)
-	{
-		int id = startid + i * MY_GAME_SIZE;;
-		for (int j = 0; j < MY_GAME_SIZE; ++j)
-		{
-			htab[i][j] = CreateWindowW(L"static", L"2048",
-				WS_CHILD | WS_VISIBLE | WS_BORDER | SS_CENTER | SS_CENTERIMAGE,	// 字体居中
-				x + width_ocp * j, y + height_ocp * i,
-				MY_ELEM_WIDTH, MY_ELEM_HEIGHT,
-				hWnd, HMENU(id + j), hInst, nullptr);
-			::SendMessage(htab[i][j], WM_SETFONT, (WPARAM)hfont, NULL);
-		}
-	}
-}
-
-void initGameTable(HWND hWnd, int players)
-{
-	// 字体
-	static HFONT hfont = MYCREATEFRONT(16, 8, FW_BOLD);
-	// 标题，需要从 char 转化为 WCHAR
-	char title[256] = { 0 };
-	WCHAR wch[256];
-	for (int i = 0; i < MY_MAX_PLAYERS; ++i)
-	{
-		// ASNI 转化为 Unicode
-		sprintf_s(title, "玩家 %d", i + 1);
-		USES_CONVERSION;//宏
-		WCHAR* p = A2W(title);
-		wcscpy_s(wch, p);
-		// 创建 Frame
-		htabFrame[i] = CreateWindowW(L"static", wch, WS_CHILD | WS_DLGFRAME /*| WS_VISIBLE*/,
-			15 + (i % 4) * (MY_TABLE_FRAME_WIDTH + MY_TF_WIDTH), 60 + (i / 4) * (MY_TABLE_FRAME_HEIGHT + MY_TF_HEIGHT),
-			MY_TABLE_FRAME_WIDTH, MY_TABLE_FRAME_HEIGHT,
-			hWnd, HMENU(IDF_MY_TAB_0 + i * 10), hInst, nullptr);
-		// 添加表格元素
-		initTabFrame(htabFrame[i], hGameTable[i], IDT_MY_TABLE_0 + 50 * i);
-		// 添加信息输出 LABLE
-		hGameRes[i] = CreateWindowW(L"static", L"GAME OVER!", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-			100, 0, 100, 30, htabFrame[i], HMENU(IDF_MY_TAB_0 + i * 10 + 1), hInst, nullptr);
-		// 设置字体
-		::SendMessage(htabFrame[i], WM_SETFONT, (WPARAM)hfont, NULL);
-		::SendMessage(hGameRes[i], WM_SETFONT, (WPARAM)hfont, NULL);
-	}
-
-	::SendMessage(htabFrame[3], WM_SETTEXT, 0, (LPARAM)(LPCTSTR)L"YOU");
 }
 
 void initMainFrame(HWND hWnd)
@@ -582,6 +616,7 @@ void freshListBox(HWND hWnd)
 		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
 		return;
 	}
+	Client* cp = Client::getInstance();
 	// TODO: 客户端查找服务器
 	if (cp->findServer(mc_ip, mc_port, MAX_FOUND_SERVER, MAX_FOUND_TIME, fdservs) < 0) {
 		::MessageBox(hWnd, L"FAILED", L"查找错误", NULL);
@@ -603,15 +638,10 @@ void freshListBox(HWND hWnd)
 	}
 }
 
-void GetServFrameMsg(HWND hWnd)
+void startFromServFrame(HWND hWnd)
 {
-	char name[BUFSIZE] = { 0 };
-	int players = 0;
-	int port = 0;
-	char mc_ip[IP_LENGTH] = { 0 };
-	int mc_port = 0;
 	WCHAR buf[256] = { 0 };
-	// TODO: 获取编辑框文本
+	// TODO: 获取编辑框文本，保存到 serv_property 对象结构体中
 	// 获取房间名
 	int len = ::SendMessage(htxt_name, WM_GETTEXTLENGTH, NULL, NULL);
 	if (len <= 0) {
@@ -619,20 +649,20 @@ void GetServFrameMsg(HWND hWnd)
 		return;
 	}
 	::SendMessage(htxt_name, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
-	wcharToArrayChar(name, buf);
+	wcharToArrayChar(serv_property.name, buf);
 	// 获取人数
 	len = ::SendMessage(htxt_players, WM_GETTEXTLENGTH, NULL, NULL);
 	::SendMessage(htxt_players, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
-	players = wcharToInt(buf);
-	if (players <= 0 || players > MY_MAX_PLAYERS) {
+	serv_property.clients = wcharToInt(buf);
+	if (serv_property.clients <= 0 || serv_property.clients > MY_MAX_PLAYERS) {
 		::MessageBox(hWnd, L"人数限制：1 ~ 8", L"超出范围", NULL);
 		return;
 	}
 	// 获取端口
 	len = ::SendMessage(htxt_port, WM_GETTEXTLENGTH, NULL, NULL);
 	::SendMessage(htxt_port, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
-	port = wcharToInt(buf);
-	if (port < 1024 || port >= 65536) {
+	serv_property.port = wcharToInt(buf);
+	if (serv_property.port < 1024 || serv_property.port >= 65536) {
 		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
 		return;
 	}
@@ -643,31 +673,55 @@ void GetServFrameMsg(HWND hWnd)
 		::MessageBox(hWnd, L"多播IP不符", L"超出范围", NULL);
 		return;
 	}
-	wcharToArrayChar(mc_ip, buf);
+	wcharToArrayChar(serv_property.mc_ip, buf);
 	// TODO: 进一步检查多播 IP 是否正确
 
 	// 获取多播端口
 	len = ::SendMessage(htxt_mc_port, WM_GETTEXTLENGTH, NULL, NULL);
 	::SendMessage(htxt_mc_port, WM_GETTEXT, (WPARAM)len + 1, (LPARAM)buf);
-	mc_port = wcharToInt(buf);
-	if (mc_port < 1024 || mc_port >= 65536) {
+	serv_property.mc_port = wcharToInt(buf);
+	if (serv_property.mc_port < 1024 || serv_property.mc_port >= 65536) {
 		::MessageBox(hWnd, L"端口限制：1024 ~ 65535", L"超出范围", NULL);
 		return;
 	}
-#ifdef _DEBUG		// 显示各项信息
-	char tmp[BUFSIZE] = { 0 };
-	sprintf_s(tmp, "%s %d %d %s %d", name, players, port, mc_ip, mc_port);
-	USES_CONVERSION;
-	WCHAR* k = A2W(tmp);
-	::MessageBox(hWnd, k, L"ALL PERPORTY", NULL);
-#endif
-	// TODO: 启动服务器
-
-
-
+	// TODO: 启动服务器 和 本地客户端
+	// 设置本地 IP 和端口
+	if (!MyGetLocalIP(client_property.serv_ip))
+	{
+		::MessageBox(hWnd, L"Get Local IP FAILED", L"ERROR", NULL);
+		return;
+	}
+	client_property.serv_port = serv_property.port;
+	// 启动服务器线程
+	hserv_thd = CreateThread(NULL, 0, MyServThreadPro, NULL, 0, &hserv_thd_id);
+	if (hserv_thd == NULL)
+	{
+		::MessageBox(hWnd, L"服务器启动失败", L"警告", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return;
+	}
+	// 启动状态监测线程
+	waiting_property = CLIENT_WAITING;
+	hwaiting_thd = CreateThread(NULL, 0, MyWaitingThreadPro, NULL, 0, &hwaiting_thd_id);
+	if (hwaiting_thd == NULL)
+	{
+		::MessageBox(hWnd, L"输出启动失败", L"警告", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return;
+	}
+	// 启动本地客户端线程
+	hclient_thd = CreateThread(NULL, 0, MyClientThreadPro, NULL, 0, &hclient_thd_id);
+	if (hclient_thd == NULL)
+	{
+		::MessageBox(hWnd, L"客户端启动失败", L"警告", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return;
+	}
+	ShowWindow(hservFrame, SW_HIDE);
+	
 }
 
-void GetClientFrameMsg(HWND hWnd)
+void startFromClientFrame(HWND hWnd)
 {
 	// 获取列表框中的选中索引， -1 为没选， 选中索引从 0 开始
 	int index = ::SendMessage(hlist_serv_name, LB_GETCURSEL, NULL, NULL);
@@ -676,8 +730,25 @@ void GetClientFrameMsg(HWND hWnd)
 		return;
 	}
 	// TODO: 启动客户端
-
-
+	waiting_property = CLIENT_WAITING;
+	hwaiting_thd = CreateThread(NULL, 0, MyWaitingThreadPro, NULL, 0, &hwaiting_thd_id);
+	if (hwaiting_thd == NULL)
+	{
+		::MessageBox(hWnd, L"输出启动失败", L"警告", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return;
+	}
+	::memcpy(client_property.serv_ip, fdservs.ip[index], sizeof(char) * IP_LENGTH);
+	client_property.serv_port = fdservs.port[index];
+	hclient_thd = CreateThread(NULL, 0, MyClientThreadPro, NULL, 0, &hclient_thd_id);
+	if (hclient_thd == NULL)
+	{
+		::MessageBox(hWnd, L"客户端启动失败", L"警告", NULL);
+		ExitThread(hserv_thd_id);
+		Server::getInstance()->stop();
+		return;
+	}
+	ShowWindow(hclientFrame, SW_HIDE);
 }
 
 void wcharToArrayChar(char* dst, const WCHAR* wch)
@@ -697,4 +768,147 @@ int wcharToInt(const WCHAR* wch)
 	for (int i = 0; tmp[i] >= '0' && tmp[i] <= '9'; ++i)
 		res = res * 10 + (tmp[i] - '0');
 	return res;
+}
+
+bool MyGetLocalIP(char* dst)
+{
+	WSADATA wsa;
+	if (::WSAStartup(MAKEWORD(2, 2), &wsa) < 0)
+		return false;
+	char hostname[255] = { 0 };
+	if (::gethostname(hostname, sizeof(hostname)) != 0)
+	{
+		WSACleanup();
+		return false;
+	}
+	HOSTENT* phost = ::gethostbyname(hostname);
+	in_addr addr;
+	for (int i = 0;; ++i)
+	{
+		char* p = phost->h_addr_list[i];
+		if (p == NULL) break;
+		::memcpy(&addr.S_un.S_addr, p, phost->h_length);
+		p = ::inet_ntoa(addr);
+
+		::memcpy(dst, p, sizeof(char) * IP_LENGTH);
+	}
+	//char buf[BUFSIZE] = { 0 };
+	//sprintf_s(buf, "%s", dst);
+	//USES_CONVERSION;
+	//WCHAR* wch = A2W(buf);
+	//::MessageBox(NULL, wch, L"", NULL);
+	WSACleanup();
+	return true;;
+}
+
+DWORD __stdcall MyServThreadPro(LPVOID lpParam)
+{
+	Server* sp = Server::getInstance();
+	sp->setControlOption(new GameSeedCreator());	// 随机种子产生器
+	if (sp->start(serv_property.name, serv_property.port, serv_property.clients,
+		serv_property.mc_ip, serv_property.mc_port) < 0)
+	{
+		::MessageBox(hRoot, L"Server Start Failed", L"Thread ERROR", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return 1;
+	}
+	while (sp->isRunning()) Sleep(200);
+	sp->stop();
+	return 0;
+}
+
+DWORD __stdcall MyClientThreadPro(LPVOID lpParam)
+{
+	Sleep(100);		// 等待服务端先启动
+	Client* cp = Client::getInstance();
+	char initenv[BUFSIZE] = { 0 };
+	int len = cp->connServer(client_property.serv_ip, client_property.serv_port, initenv);
+	if (len < 0)
+	{
+		::MessageBox(hRoot, L"Client Connect Failed", L"Thread ERROR", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return 1;
+	}
+	::SendMessage(hRoot, IDM_MY_CLIENT_CONN_OK, (WPARAM)initenv, (LPARAM)len);
+	if (cp->start() < 0)
+	{
+		::MessageBox(hRoot, L"Client Start Failed", L"Thread ERROR", NULL);
+		::SendMessage(hRoot, IDM_MY_THREAD_ERROR, NULL, NULL);
+		return 2;
+	}
+	::SendMessage(hRoot, IDM_MY_CLIENT_START_OK, NULL, NULL);
+	return 0;
+}
+
+DWORD __stdcall MyWaitingThreadPro(LPVOID)
+{
+	::ShowWindow(hlab_waiting, SW_SHOW);
+	char label_serv[100] = MY_WAITING_SERVER_LABLE;
+	char label_oth[100] = MY_WAITING_OTHERS_LABLE;
+	int len_serv = strlen(label_serv) - 3;
+	int len_oth = strlen(label_oth) - 3;
+	int i = 0;
+	char buf[100] = { 0 };
+	USES_CONVERSION;
+	WCHAR* p = nullptr;
+	while (1)
+	{
+		i = (i + 1) % 4;
+		switch (waiting_property)
+		{
+		case CLIENT_WAITING:
+			::memcpy(buf, label_serv, sizeof(char) * (len_serv + i));
+			buf[len_serv + i] = '\0';
+			break;
+		case CLIENT_CONN_SUCCESS:
+			::memcpy(buf, label_oth, sizeof(char) * (len_oth + i));
+			buf[len_oth + i] = '\0';
+			break;
+		case CLIENT_ERROR:
+			::SendMessage(hlab_waiting, WM_SETTEXT, NULL, (LPARAM)L"  Connect FAILED!");
+			return 0;
+		case CLIENT_ALL_START:
+			::ShowWindow(hlab_waiting, SW_HIDE);
+			return 0;
+		}
+		p = A2W(buf);
+		::SendMessage(hlab_waiting, WM_SETTEXT, NULL, (LPARAM)p);
+		std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	}
+	return 0;
+}
+
+DWORD __stdcall MySenderThreadPro(LPVOID lpParam)
+{
+	char buf[BUFSIZE] = { 0 };
+	Client* cp = Client::getInstance();
+	while (waiting_property == CLIENT_ALL_START)
+	{
+		if (startpos == endpos) Sleep(20);
+		
+	}
+	return 0;
+}
+
+void initWinGameTable(const char* initenv, int len)
+{
+	// 初始化游戏盘
+	int seed = initenv[0];
+	static GameTable_2048* table[MY_MAX_PLAYERS] = { nullptr };
+	int x0 = 10;
+	int y0 = 40;
+	for (int i = 0; i < MY_MAX_PLAYERS; ++i)
+	{
+		table[i] = new GameTable_2048(i, x0 + (MY_TABLE_WIDTH + MY_TF_WIDTH) * i,
+			y0 + (MY_TABLE_HEIGHT + MY_TF_HEIGHT) * (i / 4),
+			hRoot, IDT_MY_TABLE_0 + i * 50, hInst, seed);
+	}
+	Client* cp = Client::getInstance();
+	for (int i = 0; i < cp->getClients(); ++i)
+	{
+		if (i + 1 == cp->getIndex())
+			table[i]->highlight();
+		winGame.addContent(table[i]);
+	}
+	cp->setPostMan(&winGame);	// 将客户端接收的信息交由 winGame 处理
 }

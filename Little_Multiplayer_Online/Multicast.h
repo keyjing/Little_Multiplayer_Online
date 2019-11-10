@@ -19,6 +19,7 @@
 
 #define IP_LENGTH			16
 #define BUFSIZE				1024
+#define MC_MSG_LENGTH		100
 
 #define MC_DEFAULT_ADDR		"230.0.0.1"
 #define MC_DEFAULT_PORT		2333
@@ -43,7 +44,7 @@ public:
 	// @ msg[][BUFSIZE]: 接收的消息
 	// @ from_ip[][IP_LENGTH]: 消息的来源 IP
 	// 返回值: 实际接收个数
-	int receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char from_ip[][IP_LENGTH]);
+	int receiver(int maxfound, int time_limit, char msg[][MC_MSG_LENGTH], char from_ip[][IP_LENGTH]);
 
 private:
 	char mc_ip[IP_LENGTH] = { 0 };			//多播组 IP 地址 224.0.0.0 ~ 239.255.255.255

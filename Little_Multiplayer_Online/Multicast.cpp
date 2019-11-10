@@ -8,7 +8,7 @@ long long getHashOfIP(const char* ip)		// 获取 IP 字符串的 Hash 值
 {
 	if (ip == NULL || ip[0] == '\0')
 		return 0;
-	int sub[4] = { 0 };
+	long long sub[4] = { 0 };
 	int k = 0;
 	for (int i = 0; i < IP_LENGTH && ip[i] != '\0'; ++i) {
 		if (ip[i] >= '0' && ip[i] <= '9')
@@ -112,7 +112,7 @@ int Multicast::sender(const char* msg)
 	return MC_NO_OCCUPIED;
 }
 
-int Multicast::receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char from_ip[][IP_LENGTH])
+int Multicast::receiver(int maxfound, int time_limit, char msg[][MC_MSG_LENGTH], char from_ip[][IP_LENGTH])
 {
 	if (maxfound <= 0 || time_limit <= 0)
 		return MC_NO_RECEVICE;
@@ -166,9 +166,10 @@ int Multicast::receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char 
 	int count = 0;		// 查找次数
 	struct timeval timeout = { 0,  (time_limit / maxfound) };	// 每次查找最大时间为 time_limit/maxfound
 	struct fd_set rfds;
-	long long foundip_hash[MAX_FOUND_SERVER] = { 0 };
+	long long* foundip_hash = new long long[maxfound]();
 	while (record < maxfound && count++ < maxfound)
 	{
+		this_thread::sleep_for(chrono::milliseconds(time_limit / maxfound));
 		FD_ZERO(&rfds);
 		FD_SET(sock, &rfds);
 		if (::select(0, &rfds, NULL, NULL, &timeout) <= 0)
@@ -178,16 +179,18 @@ int Multicast::receiver(int maxfound, int time_limit, char msg[][BUFSIZE], char 
 			break;
 		::inet_ntop(AF_INET, &from.sin_addr, from_ip[record], IP_LENGTH);
 		long long ip_hash = getHashOfIP(from_ip[record]);
-		bool found = false;
-		for (int i = 0; i < record && !found; ++i)
-			if (foundip_hash[i] == ip_hash) found = true;
-		if (found)		// 已记录，丢弃
-			break;
+		bool isRecorded = false;
+		for (int i = 0; i < record && !isRecorded; ++i)
+			if (foundip_hash[i] == ip_hash) isRecorded = true;
+		if (isRecorded)		// 已记录，丢弃
+			continue;		// 重新查找
 		// 进行记录
+		foundip_hash[record] = ip_hash;
 		if (ret >= BUFSIZE) ret = BUFSIZE - 1;
 		msg[record][ret] = '\0';
 		++record;
 	}
+	delete[] foundip_hash;
 	::closesocket(sockM);
 	::closesocket(sock);
 	MyEasyLog::write(LOG_WARNING, "MC RECEIVER RECORD", record);

@@ -136,6 +136,7 @@
     <ClInclude Include="Game_2048.h" />
     <ClInclude Include="Multicast.h" />
     <ClInclude Include="MyEasyLog.h" />
+    <ClInclude Include="MySecurity.h" />
     <ClInclude Include="Server.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

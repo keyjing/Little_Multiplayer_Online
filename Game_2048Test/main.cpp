@@ -14,7 +14,7 @@ int main()
 		for (int i = 0; i < GAME_SIZE; ++i)
 		{
 			for (int j = 0; j < GAME_SIZE; ++j)
-				cout << game.matrix[i][j] << " ";
+				cout << game.get(i, j) << " ";
 			cout << endl;
 		}
 		ch = _getch();

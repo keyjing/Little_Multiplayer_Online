@@ -18,7 +18,7 @@ class ConsolePostMan : public PostMan
 	virtual void delivery(int id, const char* msg, int len) override
 	{
 		Client* cp = Client::getInstance();
-		if (id != cp->getIndex()) return;
+		//if (id != cp->getIndex()) return;
 		for (int i = 0; i < len; ++i)
 			cout << msg[i];
 	}
@@ -35,11 +35,12 @@ int main()
 	cout << endl;
 
 	if (ch == 's') {
+		cout << "Wait connected..." << endl;
 		thread thds([=]()
 			{
 				serv_running = true;
 				Server* sp = Server::getInstance();
-				sp->start("CS_TEST", 1234, 1, MC_DEFAULT_ADDR, MC_DEFAULT_PORT);
+				sp->start("CS_TEST", 1234, 2, MC_DEFAULT_ADDR, MC_DEFAULT_PORT);
 				while (client_running) Sleep(20);
 				//this_thread::sleep_for(chrono::seconds(2));
 				cout << "SERVER: TO STOP" << endl;
@@ -51,7 +52,12 @@ int main()
 
 		Client* cp = Client::getInstance();
 		cp->setPostMan(new ConsolePostMan());
-		cp->start("127.0.0.1", 1234);
+		char buf[BUFSIZE] = { 0 };
+		if (cp->connServer("127.0.0.1", 1234, buf) < 0 || cp->start() == CLIENT_ERROR)
+		{
+			cout << "Connect to Server FAILED." << endl;
+			return 1;
+		}
 		cout << "Press keyboard to send and see detail in log." << endl;
 		cout << "Pree 'q' to end." << endl;
 		while ((ch = _getch()) != 'q') cp->addOpts(&ch, 1);
@@ -80,7 +86,13 @@ int main()
 		int index = -1;
 		while (index < 0 || index >= found) cin >> index;
 
-		cp->start(fdservs.ip[index], fdservs.port[index]);
+		char buf[BUFSIZE] = { 0 };
+		if (cp->connServer(fdservs.ip[index], fdservs.port[index], buf) < 0
+			|| cp->start() == CLIENT_ERROR)
+		{
+			cout << "Connect to Server FAILED." << endl;
+			return 1;
+		}
 
 		cout << "Press keyboard to send and see detail in log." << endl;
 		cout << "Pree 'q' to end." << endl;

@@ -7,8 +7,11 @@
 #define NO_FOUND_SERVER		-1
 #define FOUND_SERV_OVERFLOW	-2
 
-#define CLIENT_SUCCESS		0
-#define CLIENT_ERROR		-1
+#define CLIENT_OK				2
+#define CLIENT_ALL_START		1		// 所有客户端均启动
+#define CLIENT_CONN_SUCCESS		0		// 连接服务器成功
+#define CLIENT_WAITING			-1		// 等待连接
+#define CLIENT_ERROR			-2		// 连接失败
 
 class PostMan
 {
@@ -19,7 +22,7 @@ public:
 
 // 找到的服务器列表结构体
 struct FoundServerResult {
-	char name[MAX_FOUND_SERVER][BUFSIZE] = { {0} };
+	char name[MAX_FOUND_SERVER][MC_MSG_LENGTH] = { {0} };
 	char ip[MAX_FOUND_SERVER][IP_LENGTH] = { {0} };
 	int port[MAX_FOUND_SERVER] = { 0 };
 	int found = 0;
@@ -52,7 +55,9 @@ public:
 
 	int addOpts(const char* opts, int len);				// 向发送数据缓冲区写入新数据
 
-	int start(const char* server_ip, int serv_port);	// 通过指定 IP 和 端口 连接服务器，并启动服务
+	int connServer(const char* server_ip, int serv_port, char* initenv);	// 通过指定 IP 和 端口 连接服务器，并获取初始环境信息
+
+	int start();			// 启动服务
 
 	void stop(void);		// 关闭所有执行线程
 
@@ -64,12 +69,9 @@ private:
 		::WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
 
-
 	static void send_thd(void);			// 发送线程调用函数，清空发送数据缓冲区
 	static void recv_thd(void);			// 接收线程调用函数，写入接收数据缓冲区
 	void thd_finished();				// 线程结束收尾操作，线程数减一
-
-	int connServer(const char* server_ip, int serv_port);	// 通过指定 IP 和 端口 连接服务器
 
 	static Client* cp;				// 单例句柄
 
