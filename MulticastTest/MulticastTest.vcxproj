@@ -20,8 +20,8 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
-    <ProjectGuid>{C2DC513E-4229-4696-991B-BBCF0AB55067}</ProjectGuid>
-    <RootNamespace>LittleMultiplayerOnline</RootNamespace>
+    <ProjectGuid>{E8DDB023-2486-46DC-8FE6-CABC4D2502D0}</ProjectGuid>
+    <RootNamespace>MulticastTest</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -74,13 +74,10 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <SDLCheck>false</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <ImportLibrary>
-      </ImportLibrary>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -125,19 +122,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Client.cpp" />
-    <ClCompile Include="Game_2048.cpp" />
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="Multicast.cpp" />
-    <ClCompile Include="Server.cpp" />
+    <ProjectReference Include="..\Little_Multiplayer_Online\Little_Multiplayer_Online.vcxproj">
+      <Project>{c2dc513e-4229-4696-991b-bbcf0ab55067}</Project>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Client.h" />
-    <ClInclude Include="Game_2048.h" />
-    <ClInclude Include="Multicast.h" />
-    <ClInclude Include="MyEasyLog.h" />
-    <ClInclude Include="MySecurity.h" />
-    <ClInclude Include="Server.h" />
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="MulticastTest.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
