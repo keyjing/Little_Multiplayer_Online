@@ -6,7 +6,7 @@
 #define GAME_RES_FAILED		12
 
 #define GAME_SIZE			4			// 行列大小
-#define GAME_TARGET			16		// 终点数字
+#define GAME_TARGET			2048		// 终点数字
 #define GAME_SEED_CREATE	2			// 产生数字
 
 const int GAME_ELEM_SIZE = GAME_SIZE * GAME_SIZE;

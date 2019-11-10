@@ -21,6 +21,8 @@
 using std::thread;
 
 #define MY_MAIN_TITLE			"2048小游戏"
+#define MY_DEFAULT_ROOM_NAME		TEXT("SOLO LIVE")
+#define MY_DEFAULT_PLAYERS			TEXT("1")
 #define MY_WAITING_SERVER_LABLE		"  Connect to Server..."
 #define MY_WAITING_OTHERS_LABLE		"    Waiting Others... "
 
@@ -508,6 +510,8 @@ void initServFrame(HWND hWnd)
 	::SendMessage(hbtn_serv_ok, WM_SETFONT, (WPARAM)hfont3, NULL);
 	::SendMessage(hbtn_serv_cancel, WM_SETFONT, (WPARAM)hfont4, NULL);
 	// TODO: 设置默认值
+	::SendMessage(htxt_name, WM_SETTEXT, NULL, (LPARAM)MY_DEFAULT_ROOM_NAME);
+	::SendMessage(htxt_players, WM_SETTEXT, NULL, (LPARAM)MY_DEFAULT_PLAYERS);
 	char buf[BUFSIZE] = { 0 };
 	sprintf_s(buf, "%s", DEFAULT_SERV_PORT);
 	USES_CONVERSION;
